@@ -1,0 +1,30 @@
+{
+  "name": "terminal-climber-overlay",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A transparent desktop climber that scales visible terminal text.",
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "probe:uia": "electron . --uia-probe",
+    "overlay": "npm run build && electron .",
+    "overlay:dev": "concurrently -k -s first \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\""
+  },
+  "dependencies": {
+    "koffi": "3.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.9.0",
+    "concurrently": "^9.2.0",
+    "cross-env": "^7.0.3",
+    "electron": "^43.1.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.1.5",
+    "vitest": "^4.1.10",
+    "wait-on": "^8.0.3"
+  }
+}
