@@ -688,6 +688,7 @@ export function reduceClimberMotion(
       );
       model.x = handCenterX - HAND_CENTER_OFFSET_X;
       model.y = campBodyY(current);
+      model.phaseElapsed += dt;
       const next = chooseNextHold(
         current,
         holds,
@@ -803,6 +804,7 @@ export function selectClimberSpriteCell(
   timestamp: number,
   bumped: boolean,
   reducedMotion: boolean,
+  phaseElapsed = 0,
 ): number {
   if (bumped) return 23;
   const frame = reducedMotion ? 0 : Math.floor(timestamp / 140);
@@ -815,11 +817,17 @@ export function selectClimberSpriteCell(
     case 'launching':
       return 12 + (frame % 2);
     case 'summiting':
-      return 24 + (frame % 2);
+      if (reducedMotion) return 24;
+      return phaseElapsed < SUMMIT_MANTLE_DURATION * 0.58 ? 24 : 25;
     case 'planting':
-      return 26 + (frame % 2);
-    case 'camped':
-      return reducedMotion ? 28 : 28 + (frame % 3);
+      if (reducedMotion) return 26;
+      return phaseElapsed < FLAG_PLANT_DURATION * 0.5 ? 26 : 27;
+    case 'camped': {
+      if (reducedMotion) return 28;
+      const campCycle = phaseElapsed % 12;
+      if (campCycle >= 5 && campCycle < 6) return 29;
+      return campCycle >= 8 ? 30 : 28;
+    }
     case 'packing':
       return 31;
     case 'falling':
@@ -1408,6 +1416,7 @@ export class ClimberSimulation {
       timestamp,
       this.#bumpUntil > this.#clock(),
       this.#reducedMotion,
+      this.#motion.phaseElapsed,
     );
     const column = cell % 8;
     const row = Math.floor(cell / 8);

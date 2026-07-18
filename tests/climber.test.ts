@@ -475,7 +475,7 @@ describe('DOM-free climber motion reducer', () => {
     );
   });
 
-  it('freezes decorative atlas cycling without changing state-specific frames', () => {
+  it('uses deliberate summit cadence and freezes it for reduced motion', () => {
     expect(selectClimberSpriteCell('hanging', 0, false, false)).toBe(0);
     expect(selectClimberSpriteCell('hanging', 140, false, false)).toBe(1);
     expect(selectClimberSpriteCell('hanging', 0, false, true)).toBe(0);
@@ -486,6 +486,13 @@ describe('DOM-free climber motion reducer', () => {
     expect(selectClimberSpriteCell('summiting', 0, false, true)).toBe(24);
     expect(selectClimberSpriteCell('planting', 0, false, true)).toBe(26);
     expect(selectClimberSpriteCell('camped', 1_400, false, true)).toBe(28);
+    expect(selectClimberSpriteCell('summiting', 0, false, false, 0.4)).toBe(25);
+    expect(selectClimberSpriteCell('planting', 0, false, false, 0.5)).toBe(27);
+    expect(selectClimberSpriteCell('camped', 0, false, false, 0)).toBe(28);
+    expect(selectClimberSpriteCell('camped', 0, false, false, 5.5)).toBe(29);
+    expect(selectClimberSpriteCell('camped', 0, false, false, 6.5)).toBe(28);
+    expect(selectClimberSpriteCell('camped', 0, false, false, 8.5)).toBe(30);
+    expect(selectClimberSpriteCell('camped', 0, false, false, 12.1)).toBe(28);
     expect(selectClimberSpriteCell('packing', 1_400, false, true)).toBe(31);
   });
 
