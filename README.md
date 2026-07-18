@@ -43,7 +43,7 @@ The expanded status capsule also provides pause, reset, passthrough, and close b
 - Ordinary scrolling carries an attached climber with its row.
 - A removed row, redraw, fast scroll, or fast cursor strike causes a fall.
 - When an attached row exits above the terminal viewport, the climber re-enters from the top of the physical display, falls to the display floor, lands, and restarts.
-- At a stable route summit, the climber mantles onto the text, plants a flag, and camps. A newly confirmed handhold makes it pack up and resume climbing.
+- Only a stable, topmost terminal row counts as a summit. There the climber mantles onto the text, plants a flag, and camps; a newly confirmed handhold makes it pack up and resume climbing.
 - A cursor knockoff leaves the flag behind. The campsite is cleared when its row disappears, the terminal target changes, or the climber is reset.
 - Focusing a nonterminal window for more than 500 ms releases the climber and leaves it pacing at the display bottom until tracking resumes.
 

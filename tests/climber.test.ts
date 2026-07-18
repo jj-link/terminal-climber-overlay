@@ -237,7 +237,7 @@ describe('ClimberSimulation attachment rules', () => {
     const candidate = rendererSnapshot(['NEW', 'A', 'B', 'C'], {
       sampledAt: 100,
     });
-    candidate.rows[0].rect = { x: 220, y: 180, width: 50, height: 16 };
+    candidate.rows[0].rect = { x: 260, y: 180, width: 30, height: 16 };
 
     simulation.setTerminalSnapshot(candidate);
     frames.advance(16);
@@ -254,6 +254,28 @@ describe('ClimberSimulation attachment rules', () => {
     expect(simulation.state).toBe('hanging');
     for (let frame = 0; frame < 20; frame += 1) frames.advance(16);
     expect(simulation.state).toBe('hanging');
+    simulation.destroy();
+  });
+
+  it('never treats a lower route dead end as the terminal summit', () => {
+    const frames = new FrameDriver();
+    const simulation = new ClimberSimulation({
+      canvas: null,
+      displaySize: { width: 300, height: 300 },
+      clock: () => frames.now,
+      requestAnimationFrame: frames.request,
+      cancelAnimationFrame: frames.cancel,
+    });
+    const splitRoute = rendererSnapshot(['lower', 'upper']);
+    splitRoute.rows[0].rect = { x: 0, y: 216, width: 30, height: 16 };
+    splitRoute.rows[1].rect = { x: 250, y: 80, width: 30, height: 16 };
+    simulation.setTerminalSnapshot(splitRoute);
+
+    advanceUntil(simulation, frames, 'hanging', 160);
+    for (let frame = 0; frame < 200; frame += 1) frames.advance(16);
+
+    expect(simulation.state).toBe('hanging');
+    expect(simulation.hasFlag).toBe(false);
     simulation.destroy();
   });
 

@@ -297,6 +297,8 @@ function chooseNextHold(
 ): TerminalRow | undefined {
   const maximumReach = Math.max(96, 6 * rowHeight);
   const currentY = attachmentHandY(current);
+  const currentMinimumX = minimumHandCenterX(current);
+  const currentMaximumX = maximumHandCenterX(current);
   let best: TerminalRow | undefined;
   let bestVertical = Number.POSITIVE_INFINITY;
   let bestHorizontal = Number.POSITIVE_INFINITY;
@@ -304,17 +306,21 @@ function chooseNextHold(
   for (const candidate of holds) {
     if (candidate.key === current.key || !isUsableClimberHold(candidate)) continue;
     const verticalGap = currentY - attachmentHandY(candidate);
-    const horizontalGap = Math.abs(
-      clamp(
-        handCenterX,
-        minimumHandCenterX(candidate),
-        maximumHandCenterX(candidate),
-      ) - handCenterX,
+    const candidateMinimumX = minimumHandCenterX(candidate);
+    const candidateMaximumX = maximumHandCenterX(candidate);
+    const horizontalMovement = Math.abs(
+      clamp(handCenterX, candidateMinimumX, candidateMaximumX) - handCenterX,
     );
+    const reachGap =
+      candidateMinimumX > currentMaximumX
+        ? candidateMinimumX - currentMaximumX
+        : candidateMaximumX < currentMinimumX
+          ? currentMinimumX - candidateMaximumX
+          : 0;
     if (
       verticalGap <= 0 ||
       verticalGap > 4 * rowHeight ||
-      horizontalGap > maximumReach
+      reachGap > maximumReach
     ) {
       continue;
     }
@@ -322,15 +328,33 @@ function chooseNextHold(
       !best ||
       verticalGap < bestVertical ||
       (verticalGap === bestVertical &&
-        (horizontalGap < bestHorizontal ||
-          (horizontalGap === bestHorizontal && candidate.index < best.index)))
+        (horizontalMovement < bestHorizontal ||
+          (horizontalMovement === bestHorizontal &&
+            candidate.index < best.index)))
     ) {
       best = candidate;
       bestVertical = verticalGap;
-      bestHorizontal = horizontalGap;
+      bestHorizontal = horizontalMovement;
     }
   }
   return best;
+}
+
+function hasUsableHoldAbove(
+  current: TerminalRow,
+  holds: readonly TerminalRow[],
+): boolean {
+  const currentY = attachmentHandY(current);
+  for (const candidate of holds) {
+    if (
+      candidate.key !== current.key &&
+      isUsableClimberHold(candidate) &&
+      attachmentHandY(candidate) < currentY - 0.5
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function hasConfirmedNextHold(
@@ -479,10 +503,14 @@ export function reduceClimberMotion(
         cachedMedianRowHeight,
       );
       if (!hasConfirmedNextHold(model, next)) {
-        model.summitStableElapsed += dt;
-        if (model.summitStableElapsed >= SUMMIT_STABILITY_DURATION) {
-          model.summitStartY = model.y;
-          setMotionState(model, 'summiting');
+        if (hasUsableHoldAbove(current, holds)) {
+          model.summitStableElapsed = 0;
+        } else {
+          model.summitStableElapsed += dt;
+          if (model.summitStableElapsed >= SUMMIT_STABILITY_DURATION) {
+            model.summitStartY = model.y;
+            setMotionState(model, 'summiting');
+          }
         }
         break;
       }
