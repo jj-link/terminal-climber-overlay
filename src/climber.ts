@@ -96,6 +96,8 @@ export interface ClimberMotionModel {
   holdFollow: HoldFollow | null;
   summitStableElapsed: number;
   targetSnapshotCount: number;
+  routeSearchAboveY: number;
+  routeRetryElapsed: number;
   summitStartY: number;
   flagKey: string | null;
   flagAnchorRatio: number;
@@ -112,6 +114,7 @@ export const SPRITE_WIDTH = 40;
 export const SPRITE_HEIGHT = 52;
 export const GRAVITY = 1900;
 export const MAX_FALL_SPEED = 1450;
+export const CLIMB_LATERAL_STEP = 36;
 export const SHIMMY_SPEED = 92;
 export const CLIMB_DURATION = 0.42;
 export const LAUNCH_DURATION = 0.7;
@@ -119,6 +122,7 @@ export const LANDING_RECOVERY = 0.35;
 export const POINTER_BUMP_SPEED = 180;
 export const STATUS_GRACE_MS = 500;
 export const TARGET_CONFIRM_SNAPSHOTS = 3;
+export const ROUTE_RETRY_DURATION = 1.5;
 export const SUMMIT_STABILITY_DURATION = 1.2;
 export const SUMMIT_MANTLE_DURATION = 0.55;
 export const FLAG_PLANT_DURATION = 0.8;
@@ -234,6 +238,8 @@ function beginFall(model: ClimberMotionModel, vx = model.vx): void {
   model.holdFollow = null;
   model.summitStableElapsed = 0;
   model.targetSnapshotCount = 0;
+  model.routeSearchAboveY = Number.POSITIVE_INFINITY;
+  model.routeRetryElapsed = 0;
   model.vx = vx;
   model.vy = Math.max(model.vy, 0);
   setMotionState(model, 'falling');
@@ -254,6 +260,8 @@ function attachToRow(model: ClimberMotionModel, row: TerminalRow): void {
   model.travel = null;
   model.summitStableElapsed = 0;
   model.targetSnapshotCount = 0;
+  model.routeSearchAboveY = Number.POSITIVE_INFINITY;
+  model.routeRetryElapsed = 0;
   setMotionState(model, 'hanging');
 }
 
@@ -294,6 +302,7 @@ function chooseNextHold(
   holds: readonly TerminalRow[],
   handCenterX: number,
   rowHeight: number,
+  searchAboveY = Number.POSITIVE_INFINITY,
 ): TerminalRow | undefined {
   const maximumReach = Math.max(96, 6 * rowHeight);
   const currentY = attachmentHandY(current);
@@ -305,7 +314,9 @@ function chooseNextHold(
 
   for (const candidate of holds) {
     if (candidate.key === current.key || !isUsableClimberHold(candidate)) continue;
-    const verticalGap = currentY - attachmentHandY(candidate);
+    const candidateY = attachmentHandY(candidate);
+    if (candidateY >= searchAboveY) continue;
+    const verticalGap = currentY - candidateY;
     const candidateMinimumX = minimumHandCenterX(candidate);
     const candidateMaximumX = maximumHandCenterX(candidate);
     const horizontalMovement = Math.abs(
@@ -374,24 +385,45 @@ function hasConfirmedNextHold(
   return model.targetSnapshotCount >= TARGET_CONFIRM_SNAPSHOTS;
 }
 
+function chooseTravelHandX(
+  model: ClimberMotionModel,
+  target: TerminalRow,
+): number {
+  const currentHandX = model.x + HAND_CENTER_OFFSET_X;
+  const minimum = minimumHandCenterX(target);
+  const maximum = maximumHandCenterX(target);
+  let direction = model.paceDirection;
+  let targetHandX = clamp(
+    currentHandX + direction * CLIMB_LATERAL_STEP,
+    minimum,
+    maximum,
+  );
+  if (Math.abs(targetHandX - currentHandX) < CLIMB_LATERAL_STEP / 3) {
+    direction = direction === 1 ? -1 : 1;
+    targetHandX = clamp(
+      currentHandX + direction * CLIMB_LATERAL_STEP,
+      minimum,
+      maximum,
+    );
+  }
+  model.paceDirection = direction === 1 ? -1 : 1;
+  return targetHandX;
+}
+
 function startTravel(
   model: ClimberMotionModel,
   kind: Travel['kind'],
   target: TerminalRow,
   duration: number,
 ): void {
-  const handCenterX = model.x + HAND_CENTER_OFFSET_X;
+  const targetHandX = chooseTravelHandX(model, target);
   model.targetKey = target.key;
   model.travel = {
     kind,
     targetKey: target.key,
     startX: model.x,
     startY: model.y,
-    targetHandX: clamp(
-      handCenterX,
-      minimumHandCenterX(target),
-      maximumHandCenterX(target),
-    ),
+    targetHandX,
     targetHandY: attachmentHandY(target),
     elapsed: 0,
     duration,
@@ -496,11 +528,19 @@ export function reduceClimberMotion(
       );
       model.x = handCenterX - HAND_CENTER_OFFSET_X;
       model.y = attachmentHandY(current) - HAND_OFFSET_Y;
+      if (Number.isFinite(model.routeSearchAboveY)) {
+        model.routeRetryElapsed += dt;
+        if (model.routeRetryElapsed >= ROUTE_RETRY_DURATION) {
+          model.routeSearchAboveY = Number.POSITIVE_INFINITY;
+          model.routeRetryElapsed = 0;
+        }
+      }
       const next = chooseNextHold(
         current,
         holds,
         handCenterX,
         cachedMedianRowHeight,
+        model.routeSearchAboveY,
       );
       if (!hasConfirmedNextHold(model, next)) {
         if (hasUsableHoldAbove(current, holds)) {
@@ -919,6 +959,8 @@ export class ClimberSimulation {
       holdFollow: null,
       summitStableElapsed: 0,
       targetSnapshotCount: 0,
+      routeSearchAboveY: Number.POSITIVE_INFINITY,
+      routeRetryElapsed: 0,
       summitStartY: 0,
       flagKey: null,
       flagAnchorRatio: 0.84,
@@ -1062,6 +1104,8 @@ export class ClimberSimulation {
         if (this.#motion.state === 'hanging') {
           if (Math.abs(rowDeltaX) > 0.5 || Math.abs(rowDeltaY) > 0.5) {
             this.#motion.summitStableElapsed = 0;
+            this.#motion.routeSearchAboveY = Number.POSITIVE_INFINITY;
+            this.#motion.routeRetryElapsed = 0;
           }
           const oldHandCenterX = clamp(
             this.#motion.x + HAND_CENTER_OFFSET_X,
@@ -1133,6 +1177,9 @@ export class ClimberSimulation {
     }
 
     if (this.#motion.targetKey) {
+      const previousTarget = previous.rows.find(
+        (row) => row.key === this.#motion.targetKey,
+      );
       const mappedTarget = reconciliation.keyMappings.get(this.#motion.targetKey);
       if (
         !mappedTarget ||
@@ -1153,6 +1200,17 @@ export class ClimberSimulation {
         ) {
           this.#motion.targetKey = null;
           this.#motion.targetSnapshotCount = 0;
+          if (
+            previousTarget &&
+            (this.#motion.state === 'hanging' ||
+              this.#motion.state === 'shimmying')
+          ) {
+            this.#motion.routeSearchAboveY = Math.min(
+              this.#motion.routeSearchAboveY,
+              attachmentHandY(previousTarget) - 0.5,
+            );
+            this.#motion.routeRetryElapsed = 0;
+          }
           if (this.#motion.state === 'shimmying') {
             setMotionState(this.#motion, 'hanging');
           }
@@ -1271,6 +1329,8 @@ export class ClimberSimulation {
     this.#motion.phaseElapsed = 0;
     this.#motion.summitStableElapsed = 0;
     this.#motion.targetSnapshotCount = 0;
+    this.#motion.routeSearchAboveY = Number.POSITIVE_INFINITY;
+    this.#motion.routeRetryElapsed = 0;
     this.#motion.summitStartY = 0;
     this.#motion.flagKey = null;
     this.#motion.flagAnchorRatio = 0.84;

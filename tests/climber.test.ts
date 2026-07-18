@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { RendererTerminalSnapshot } from '../src/contracts';
 import {
+  CLIMB_LATERAL_STEP,
   ClimberSimulation,
   HAND_OFFSET_Y,
   HAND_SPREAD,
@@ -257,6 +258,32 @@ describe('ClimberSimulation attachment rules', () => {
     simulation.destroy();
   });
 
+  it('skips a volatile nearest row and confirms a stable higher route', () => {
+    const { simulation, frames } = hangingSimulation();
+    const route = rendererSnapshot(
+      ['volatile-1', 'stable', 'A', 'B', 'C'],
+      { sampledAt: 100 },
+    );
+    route.rows[0].rect = { x: 0, y: 184, width: 300, height: 16 };
+    route.rows[1].rect = { x: 0, y: 152, width: 300, height: 16 };
+
+    simulation.setTerminalSnapshot(route);
+    frames.advance(16);
+    for (const [volatileSignature, sampledAt] of [
+      ['volatile-2', 180],
+      ['volatile-3', 260],
+      ['volatile-4', 340],
+    ] as const) {
+      route.sampledAt = sampledAt;
+      route.rows[0].signature = volatileSignature;
+      simulation.setTerminalSnapshot(route);
+      frames.advance(16);
+    }
+
+    expect(simulation.state).toBe('climbing');
+    simulation.destroy();
+  });
+
   it('never treats a lower route dead end as the terminal summit', () => {
     const frames = new FrameDriver();
     const simulation = new ClimberSimulation({
@@ -366,6 +393,8 @@ describe('DOM-free climber motion reducer', () => {
       summitStableElapsed: 0,
       summitStartY: 0,
       targetSnapshotCount: 0,
+      routeSearchAboveY: Number.POSITIVE_INFINITY,
+      routeRetryElapsed: 0,
       flagKey: null,
       flagAnchorRatio: 0.84,
     };
@@ -406,6 +435,42 @@ describe('DOM-free climber motion reducer', () => {
     expect(model.state).toBe('launching');
     expect(model.travel?.targetKey).toBe(terminal.rows[2].key);
   });
+  it('alternates deliberate lateral movement while climbing wide rows', () => {
+    const snapshot = rendererSnapshot(['current', 'middle', 'top']);
+    snapshot.rows[0].rect = { x: 0, y: 216, width: 300, height: 16 };
+    snapshot.rows[1].rect = { x: 0, y: 184, width: 300, height: 16 };
+    snapshot.rows[2].rect = { x: 0, y: 152, width: 300, height: 16 };
+    const terminal = createTerminalSnapshot(snapshot);
+    const holds = getAttachableRows(terminal);
+    const model = fallingModel();
+    model.state = 'hanging';
+    model.resumeState = 'hanging';
+    model.y = 217;
+    model.vy = 0;
+    model.attachedKey = holds[0].key;
+    model.targetKey = holds[1].key;
+    model.targetSnapshotCount = 3;
+    const initialHandX = model.x + SPRITE_WIDTH / 2;
+
+    reduceClimberMotion(model, { holds }, 0.016);
+
+    expect(model.state).toBe('climbing');
+    expect(model.travel?.targetHandX).toBe(
+      initialHandX + CLIMB_LATERAL_STEP,
+    );
+    for (let frame = 0; frame < 9; frame += 1) {
+      reduceClimberMotion(model, { holds }, 0.05);
+    }
+    expect(model.state).toBe('hanging');
+
+    model.targetKey = holds[2].key;
+    model.targetSnapshotCount = 3;
+    reduceClimberMotion(model, { holds }, 0.016);
+
+    expect(model.state).toBe('climbing');
+    expect(model.travel?.targetHandX).toBe(initialHandX);
+  });
+
   it('freezes decorative atlas cycling without changing state-specific frames', () => {
     expect(selectClimberSpriteCell('hanging', 0, false, false)).toBe(0);
     expect(selectClimberSpriteCell('hanging', 140, false, false)).toBe(1);
