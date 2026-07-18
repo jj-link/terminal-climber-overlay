@@ -17,6 +17,10 @@ export type ClimberState =
   | 'hanging'
   | 'shimmying'
   | 'climbing'
+  | 'summiting'
+  | 'planting'
+  | 'camped'
+  | 'packing'
   | 'falling'
   | 'landing'
   | 'paused';
@@ -90,6 +94,11 @@ export interface ClimberMotionModel {
   phaseElapsed: number;
   travel: Travel | null;
   holdFollow: HoldFollow | null;
+  summitStableElapsed: number;
+  targetSnapshotCount: number;
+  summitStartY: number;
+  flagKey: string | null;
+  flagAnchorRatio: number;
 }
 
 export interface ClimberMotionEnvironment {
@@ -109,6 +118,11 @@ export const LAUNCH_DURATION = 0.7;
 export const LANDING_RECOVERY = 0.35;
 export const POINTER_BUMP_SPEED = 180;
 export const STATUS_GRACE_MS = 500;
+export const TARGET_CONFIRM_SNAPSHOTS = 3;
+export const SUMMIT_STABILITY_DURATION = 1.2;
+export const SUMMIT_MANTLE_DURATION = 0.55;
+export const FLAG_PLANT_DURATION = 0.8;
+export const CAMP_PACK_DURATION = 0.45;
 
 export const HAND_SPREAD = 9;
 export const HAND_OFFSET_Y = 7;
@@ -170,6 +184,34 @@ function attachmentHandY(row: TerminalRow): number {
   );
 }
 
+function campBodyY(row: TerminalRow): number {
+  return Math.max(0, row.rect.y - SPRITE_HEIGHT + HOLD_INSET);
+}
+
+function flagAnchorRatio(row: TerminalRow, bodyCenterX: number): number {
+  const rowCenterX = row.rect.x + row.rect.width / 2;
+  const side = bodyCenterX <= rowCenterX ? 1 : -1;
+  const anchorX = clamp(
+    bodyCenterX + side * (SPRITE_WIDTH / 2 + 10),
+    row.rect.x + HOLD_INSET,
+    row.rect.x + row.rect.width - HOLD_INSET,
+  );
+  return (anchorX - row.rect.x) / row.rect.width;
+}
+
+function isSummitState(state: ClimberState): boolean {
+  return (
+    state === 'summiting' ||
+    state === 'planting' ||
+    state === 'camped' ||
+    state === 'packing'
+  );
+}
+
+function followsAttachedRow(state: ClimberState): boolean {
+  return state === 'hanging' || state === 'shimmying' || isSummitState(state);
+}
+
 function medianRowHeight(holds: readonly TerminalRow[]): number {
   if (holds.length === 0) return 16;
   const heights = holds.map((row) => row.rect.height).sort((a, b) => a - b);
@@ -190,6 +232,8 @@ function beginFall(model: ClimberMotionModel, vx = model.vx): void {
   model.targetKey = null;
   model.travel = null;
   model.holdFollow = null;
+  model.summitStableElapsed = 0;
+  model.targetSnapshotCount = 0;
   model.vx = vx;
   model.vy = Math.max(model.vy, 0);
   setMotionState(model, 'falling');
@@ -208,6 +252,8 @@ function attachToRow(model: ClimberMotionModel, row: TerminalRow): void {
   model.attachedKey = row.key;
   model.targetKey = null;
   model.travel = null;
+  model.summitStableElapsed = 0;
+  model.targetSnapshotCount = 0;
   setMotionState(model, 'hanging');
 }
 
@@ -287,6 +333,23 @@ function chooseNextHold(
   return best;
 }
 
+function hasConfirmedNextHold(
+  model: ClimberMotionModel,
+  next: TerminalRow | undefined,
+): next is TerminalRow {
+  if (!next) {
+    model.targetKey = null;
+    model.targetSnapshotCount = 0;
+    return false;
+  }
+  if (model.targetKey !== next.key) {
+    model.targetKey = next.key;
+    model.targetSnapshotCount = 1;
+    return false;
+  }
+  return model.targetSnapshotCount >= TARGET_CONFIRM_SNAPSHOTS;
+}
+
 function startTravel(
   model: ClimberMotionModel,
   kind: Travel['kind'],
@@ -309,6 +372,8 @@ function startTravel(
     elapsed: 0,
     duration,
   };
+  model.summitStableElapsed = 0;
+  model.targetSnapshotCount = 0;
   setMotionState(model, kind === 'launch' ? 'launching' : 'climbing');
 }
 
@@ -329,10 +394,7 @@ export function reduceClimberMotion(
     environment.medianRowHeight ?? medianRowHeight(holds);
   const floorY = Math.max(0, model.displayHeight - SPRITE_HEIGHT);
 
-  if (
-    model.holdFollow &&
-    (model.state === 'hanging' || model.state === 'shimmying')
-  ) {
+  if (model.holdFollow && followsAttachedRow(model.state)) {
     const follow = model.holdFollow;
     follow.elapsed = Math.min(follow.duration, follow.elapsed + dt);
     const progress = follow.duration > 0 ? follow.elapsed / follow.duration : 1;
@@ -416,9 +478,16 @@ export function reduceClimberMotion(
         handCenterX,
         cachedMedianRowHeight,
       );
-      if (!next) break;
+      if (!hasConfirmedNextHold(model, next)) {
+        model.summitStableElapsed += dt;
+        if (model.summitStableElapsed >= SUMMIT_STABILITY_DURATION) {
+          model.summitStartY = model.y;
+          setMotionState(model, 'summiting');
+        }
+        break;
+      }
 
-      model.targetKey = next.key;
+      model.summitStableElapsed = 0;
       const targetHandCenterX = clamp(
         handCenterX,
         minimumHandCenterX(next),
@@ -440,8 +509,14 @@ export function reduceClimberMotion(
     case 'shimmying': {
       const current = rowByKey(holds, model.attachedKey);
       const target = rowByKey(holds, model.targetKey);
-      if (!current || !target) {
+      if (!current) {
         beginFall(model);
+        break;
+      }
+      if (!target) {
+        model.targetKey = null;
+        model.targetSnapshotCount = 0;
+        setMotionState(model, 'hanging');
         break;
       }
       const handCenterX = clamp(
@@ -468,6 +543,152 @@ export function reduceClimberMotion(
       model.y = attachmentHandY(current) - HAND_OFFSET_Y;
       if (nextHandCenterX === shimmyHandCenterX) {
         startTravel(model, 'climb', target, CLIMB_DURATION);
+      }
+      break;
+    }
+
+    case 'summiting': {
+      const current = rowByKey(holds, model.attachedKey);
+      if (!current) {
+        beginFall(model);
+        break;
+      }
+      const handCenterX = clamp(
+        model.x + HAND_CENTER_OFFSET_X,
+        minimumHandCenterX(current),
+        maximumHandCenterX(current),
+      );
+      const next = chooseNextHold(
+        current,
+        holds,
+        handCenterX,
+        cachedMedianRowHeight,
+      );
+      if (hasConfirmedNextHold(model, next)) {
+        setMotionState(model, 'packing');
+        break;
+      }
+      model.phaseElapsed = Math.min(
+        SUMMIT_MANTLE_DURATION,
+        model.phaseElapsed + dt,
+      );
+      const progress = smoothstep(
+        model.phaseElapsed / SUMMIT_MANTLE_DURATION,
+      );
+      model.x = handCenterX - HAND_CENTER_OFFSET_X;
+      model.y =
+        model.summitStartY +
+        (campBodyY(current) - model.summitStartY) * progress;
+      if (model.phaseElapsed >= SUMMIT_MANTLE_DURATION) {
+        setMotionState(
+          model,
+          model.flagKey === current.key ? 'camped' : 'planting',
+        );
+      }
+      break;
+    }
+
+    case 'planting': {
+      const current = rowByKey(holds, model.attachedKey);
+      if (!current) {
+        beginFall(model);
+        break;
+      }
+      const handCenterX = clamp(
+        model.x + HAND_CENTER_OFFSET_X,
+        minimumHandCenterX(current),
+        maximumHandCenterX(current),
+      );
+      const next = chooseNextHold(
+        current,
+        holds,
+        handCenterX,
+        cachedMedianRowHeight,
+      );
+      if (hasConfirmedNextHold(model, next)) {
+        setMotionState(model, 'packing');
+        break;
+      }
+      model.x = handCenterX - HAND_CENTER_OFFSET_X;
+      model.y = campBodyY(current);
+      model.phaseElapsed = Math.min(
+        FLAG_PLANT_DURATION,
+        model.phaseElapsed + dt,
+      );
+      if (model.phaseElapsed >= FLAG_PLANT_DURATION) {
+        model.flagKey = current.key;
+        model.flagAnchorRatio = flagAnchorRatio(
+          current,
+          model.x + HAND_CENTER_OFFSET_X,
+        );
+        setMotionState(model, 'camped');
+      }
+      break;
+    }
+
+    case 'camped': {
+      const current = rowByKey(holds, model.attachedKey);
+      if (!current) {
+        beginFall(model);
+        break;
+      }
+      const handCenterX = clamp(
+        model.x + HAND_CENTER_OFFSET_X,
+        minimumHandCenterX(current),
+        maximumHandCenterX(current),
+      );
+      model.x = handCenterX - HAND_CENTER_OFFSET_X;
+      model.y = campBodyY(current);
+      const next = chooseNextHold(
+        current,
+        holds,
+        handCenterX,
+        cachedMedianRowHeight,
+      );
+      if (hasConfirmedNextHold(model, next)) {
+        setMotionState(model, 'packing');
+      }
+      break;
+    }
+
+    case 'packing': {
+      const current = rowByKey(holds, model.attachedKey);
+      if (!current) {
+        beginFall(model);
+        break;
+      }
+      const handCenterX = clamp(
+        model.x + HAND_CENTER_OFFSET_X,
+        minimumHandCenterX(current),
+        maximumHandCenterX(current),
+      );
+      const next = chooseNextHold(
+        current,
+        holds,
+        handCenterX,
+        cachedMedianRowHeight,
+      );
+      if (!next) {
+        model.targetKey = null;
+        setMotionState(
+          model,
+          model.flagKey === current.key ? 'camped' : 'planting',
+        );
+        break;
+      }
+      model.targetKey = next.key;
+      model.x = handCenterX - HAND_CENTER_OFFSET_X;
+      model.y = campBodyY(current);
+      model.phaseElapsed = Math.min(
+        CAMP_PACK_DURATION,
+        model.phaseElapsed + dt,
+      );
+      if (model.phaseElapsed >= CAMP_PACK_DURATION) {
+        if (model.flagKey === current.key) model.flagKey = null;
+        model.targetKey = null;
+        model.y = attachmentHandY(current) - HAND_OFFSET_Y;
+        model.summitStableElapsed = 0;
+        setMotionState(model, 'hanging');
       }
       break;
     }
@@ -544,6 +765,14 @@ export function selectClimberSpriteCell(
       return 8 + (frame % 4);
     case 'launching':
       return 12 + (frame % 2);
+    case 'summiting':
+      return 24 + (frame % 2);
+    case 'planting':
+      return 26 + (frame % 2);
+    case 'camped':
+      return reducedMotion ? 28 : 28 + (frame % 3);
+    case 'packing':
+      return 31;
     case 'falling':
       return reducedMotion
         ? 14
@@ -563,7 +792,8 @@ function isAttachedState(state: ClimberState): boolean {
     state === 'launching' ||
     state === 'hanging' ||
     state === 'shimmying' ||
-    state === 'climbing'
+    state === 'climbing' ||
+    isSummitState(state)
   );
 }
 
@@ -659,6 +889,11 @@ export class ClimberSimulation {
       phaseElapsed: 0,
       travel: null,
       holdFollow: null,
+      summitStableElapsed: 0,
+      targetSnapshotCount: 0,
+      summitStartY: 0,
+      flagKey: null,
+      flagAnchorRatio: 0.84,
     };
     this.#lastObservedState = this.#motion.state;
 
@@ -707,6 +942,10 @@ export class ClimberSimulation {
     return { x: this.#motion.x, y: this.#motion.y };
   }
 
+  get hasFlag(): boolean {
+    return this.#motion.flagKey !== null;
+  }
+
   setTerminalSnapshot(snapshot: RendererTerminalSnapshot): void {
     if (this.#destroyed) return;
     const next = createTerminalSnapshot(snapshot);
@@ -731,6 +970,14 @@ export class ClimberSimulation {
     if (reconciliation.targetChanged || displayChanged) {
       this.reset();
       return;
+    }
+
+    if (this.#motion.flagKey) {
+      const mappedFlag = reconciliation.keyMappings.get(this.#motion.flagKey);
+      this.#motion.flagKey =
+        mappedFlag && rowByKey(this.#motionEnvironment.holds, mappedFlag)
+          ? mappedFlag
+          : null;
     }
 
     if (reconciliation.attachedExitedTop) {
@@ -774,46 +1021,86 @@ export class ClimberSimulation {
       }
       this.#motion.attachedKey = mapped;
       if (oldRow) {
-        const oldHandCenterX = clamp(
-          this.#motion.x + HAND_CENTER_OFFSET_X,
-          minimumHandCenterX(oldRow),
-          maximumHandCenterX(oldRow),
+        const rowDeltaX =
+          newRow.rect.x +
+          newRow.rect.width / 2 -
+          (oldRow.rect.x + oldRow.rect.width / 2);
+        const rowDeltaY = newRow.rect.y - oldRow.rect.y;
+        const followDuration = clamp(
+          (next.sampledAt - previous.sampledAt) / 1000,
+          0.016,
+          0.15,
         );
-        const translatedHandCenterX =
-          oldHandCenterX +
-          (newRow.rect.x +
-            newRow.rect.width / 2 -
-            (oldRow.rect.x + oldRow.rect.width / 2));
-        const targetHandCenterX = clamp(
-          translatedHandCenterX,
-          minimumHandCenterX(newRow),
-          maximumHandCenterX(newRow),
-        );
-        const startHandCenterX = clamp(
-          oldHandCenterX,
-          minimumHandCenterX(newRow),
-          maximumHandCenterX(newRow),
-        );
-        const oldHandY = this.#motion.y + HAND_OFFSET_Y;
-        const startHandY = clamp(
-          oldHandY,
-          newRow.rect.y + HOLD_INSET,
-          newRow.rect.y + newRow.rect.height - HOLD_INSET,
-        );
-        this.#motion.x = startHandCenterX - HAND_CENTER_OFFSET_X;
-        this.#motion.y = startHandY - HAND_OFFSET_Y;
-        this.#motion.holdFollow = {
-          startX: this.#motion.x,
-          startY: this.#motion.y,
-          targetX: targetHandCenterX - HAND_CENTER_OFFSET_X,
-          targetY: attachmentHandY(newRow) - HAND_OFFSET_Y,
-          elapsed: 0,
-          duration: clamp(
-            (next.sampledAt - previous.sampledAt) / 1000,
-            0.016,
-            0.15,
-          ),
-        };
+        if (this.#motion.state === 'hanging') {
+          if (Math.abs(rowDeltaX) > 0.5 || Math.abs(rowDeltaY) > 0.5) {
+            this.#motion.summitStableElapsed = 0;
+          }
+          const oldHandCenterX = clamp(
+            this.#motion.x + HAND_CENTER_OFFSET_X,
+            minimumHandCenterX(oldRow),
+            maximumHandCenterX(oldRow),
+          );
+          const targetHandCenterX = clamp(
+            oldHandCenterX + rowDeltaX,
+            minimumHandCenterX(newRow),
+            maximumHandCenterX(newRow),
+          );
+          const startHandCenterX = clamp(
+            oldHandCenterX,
+            minimumHandCenterX(newRow),
+            maximumHandCenterX(newRow),
+          );
+          const oldHandY = this.#motion.y + HAND_OFFSET_Y;
+          const startHandY = clamp(
+            oldHandY,
+            newRow.rect.y + HOLD_INSET,
+            newRow.rect.y + newRow.rect.height - HOLD_INSET,
+          );
+          this.#motion.x = startHandCenterX - HAND_CENTER_OFFSET_X;
+          this.#motion.y = startHandY - HAND_OFFSET_Y;
+          const targetX = targetHandCenterX - HAND_CENTER_OFFSET_X;
+          const targetY = attachmentHandY(newRow) - HAND_OFFSET_Y;
+          if (
+            Math.abs(targetX - this.#motion.x) > 0.25 ||
+            Math.abs(targetY - this.#motion.y) > 0.25
+          ) {
+            this.#motion.holdFollow = {
+              startX: this.#motion.x,
+              startY: this.#motion.y,
+              targetX,
+              targetY,
+              elapsed: 0,
+              duration: followDuration,
+            };
+          } else {
+            this.#motion.holdFollow = null;
+          }
+        } else if (isSummitState(this.#motion.state)) {
+          if (this.#motion.state === 'summiting') {
+            this.#motion.summitStartY += rowDeltaY;
+          }
+          const targetX = clamp(
+            this.#motion.x + rowDeltaX,
+            minimumHandCenterX(newRow) - HAND_CENTER_OFFSET_X,
+            maximumHandCenterX(newRow) - HAND_CENTER_OFFSET_X,
+          );
+          const targetY = this.#motion.y + rowDeltaY;
+          if (
+            Math.abs(targetX - this.#motion.x) > 0.25 ||
+            Math.abs(targetY - this.#motion.y) > 0.25
+          ) {
+            this.#motion.holdFollow = {
+              startX: this.#motion.x,
+              startY: this.#motion.y,
+              targetX,
+              targetY,
+              elapsed: 0,
+              duration: followDuration,
+            };
+          } else {
+            this.#motion.holdFollow = null;
+          }
+        }
       }
     }
 
@@ -823,13 +1110,41 @@ export class ClimberSimulation {
         !mappedTarget ||
         !rowByKey(this.#motionEnvironment.holds, mappedTarget)
       ) {
-        beginFall(this.#motion);
-        this.#notify(true);
-        return;
-      }
-      this.#motion.targetKey = mappedTarget;
-      if (this.#motion.travel) {
-        this.#motion.travel.targetKey = mappedTarget;
+        if (this.#motion.state === 'packing') {
+          this.#motion.targetKey = null;
+          setMotionState(
+            this.#motion,
+            this.#motion.flagKey === this.#motion.attachedKey
+              ? 'camped'
+              : 'planting',
+          );
+        } else if (
+          this.#motion.state === 'hanging' ||
+          this.#motion.state === 'shimmying' ||
+          isSummitState(this.#motion.state)
+        ) {
+          this.#motion.targetKey = null;
+          this.#motion.targetSnapshotCount = 0;
+          if (this.#motion.state === 'shimmying') {
+            setMotionState(this.#motion, 'hanging');
+          }
+        } else {
+          beginFall(this.#motion);
+          this.#notify(true);
+          return;
+        }
+      } else {
+        this.#motion.targetKey = mappedTarget;
+        if (
+          this.#motion.state === 'hanging' ||
+          (isSummitState(this.#motion.state) &&
+            this.#motion.state !== 'packing')
+        ) {
+          this.#motion.targetSnapshotCount += 1;
+        }
+        if (this.#motion.travel) {
+          this.#motion.travel.targetKey = mappedTarget;
+        }
       }
     } else if (this.#motion.travel) {
       const mappedTarget = reconciliation.keyMappings.get(
@@ -926,6 +1241,11 @@ export class ClimberSimulation {
     this.#motion.travel = null;
     this.#motion.holdFollow = null;
     this.#motion.phaseElapsed = 0;
+    this.#motion.summitStableElapsed = 0;
+    this.#motion.targetSnapshotCount = 0;
+    this.#motion.summitStartY = 0;
+    this.#motion.flagKey = null;
+    this.#motion.flagAnchorRatio = 0.84;
     this.#motion.state = 'grounded';
     this.#motion.resumeState = 'grounded';
     this.#lastPointer = null;
@@ -1011,8 +1331,11 @@ export class ClimberSimulation {
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
     context.imageSmoothingEnabled = false;
 
+    this.#renderCampsite(context, timestamp);
+    const pausedAtSummit =
+      this.#motion.state === 'paused' && isSummitState(this.#motion.resumeState);
     const cell = selectClimberSpriteCell(
-      this.#motion.state,
+      pausedAtSummit ? this.#motion.resumeState : this.#motion.state,
       timestamp,
       this.#bumpUntil > this.#clock(),
       this.#reducedMotion,
@@ -1062,6 +1385,123 @@ export class ClimberSimulation {
       8,
       14,
     );
+  }
+
+  #renderCampsite(
+    context: CanvasRenderingContext2D,
+    timestamp: number,
+  ): void {
+    if (
+      this.#backendStatus !== 'tracking' &&
+      this.#backendStatus !== 'paused'
+    ) {
+      return;
+    }
+    const visualState =
+      this.#motion.state === 'paused'
+        ? this.#motion.resumeState
+        : this.#motion.state;
+    const plantedRow = rowByKey(
+      this.#motionEnvironment.holds,
+      this.#motion.flagKey,
+    );
+    const plantingRow =
+      visualState === 'planting'
+        ? rowByKey(
+            this.#motionEnvironment.holds,
+            this.#motion.attachedKey,
+          )
+        : undefined;
+    const flagRow = plantedRow ?? plantingRow;
+    if (flagRow) {
+      let deployment = 1;
+      if (visualState === 'planting' && !plantedRow) {
+        deployment = clamp(
+          this.#motion.phaseElapsed / FLAG_PLANT_DURATION,
+          0,
+          1,
+        );
+      } else if (
+        visualState === 'packing' &&
+        plantedRow?.key === this.#motion.attachedKey
+      ) {
+        deployment =
+          1 -
+          clamp(this.#motion.phaseElapsed / CAMP_PACK_DURATION, 0, 1);
+      }
+      if (deployment > 0) {
+        const anchorRatio = plantedRow
+          ? this.#motion.flagAnchorRatio
+          : flagAnchorRatio(
+              flagRow,
+              this.#motion.x + HAND_CENTER_OFFSET_X,
+            );
+        const anchorX = Math.round(
+          flagRow.rect.x + flagRow.rect.width * anchorRatio,
+        );
+        const baseY = Math.round(flagRow.rect.y + HOLD_INSET);
+        const poleTopY = Math.round(baseY - 31 * deployment);
+        context.fillStyle = '#101719';
+        context.fillRect(anchorX - 2, poleTopY, 4, baseY - poleTopY + 2);
+        context.fillStyle = '#eadfbd';
+        context.fillRect(anchorX - 1, poleTopY + 1, 2, baseY - poleTopY);
+
+        if (deployment > 0.28) {
+          const unfurl = clamp((deployment - 0.28) / 0.72, 0, 1);
+          const flutter =
+            this.#reducedMotion || unfurl < 1
+              ? 0
+              : Math.floor(timestamp / 180) % 2;
+          const flagWidth = Math.round(17 * unfurl);
+          context.beginPath();
+          context.moveTo(anchorX + 1, poleTopY + 2);
+          context.lineTo(anchorX + 1 + flagWidth, poleTopY + 6 + flutter);
+          context.lineTo(anchorX + 1, poleTopY + 12);
+          context.closePath();
+          context.fillStyle = '#dfa62d';
+          context.fill();
+          context.strokeStyle = '#101719';
+          context.lineWidth = 2;
+          context.stroke();
+        }
+      }
+    }
+
+    if (
+      (visualState === 'planting' ||
+        visualState === 'camped' ||
+        visualState === 'packing') &&
+      this.#motion.attachedKey
+    ) {
+      const row = rowByKey(
+        this.#motionEnvironment.holds,
+        this.#motion.attachedKey,
+      );
+      if (row) {
+        const bodyCenterX = this.#motion.x + HAND_CENTER_OFFSET_X;
+        const campsiteAnchorRatio =
+          this.#motion.flagKey === row.key
+            ? this.#motion.flagAnchorRatio
+            : flagAnchorRatio(row, bodyCenterX);
+        const flagIsRightOfClimber =
+          row.rect.x + row.rect.width * campsiteAnchorRatio >= bodyCenterX;
+        const gearX = Math.round(
+          clamp(
+            this.#motion.x +
+              (flagIsRightOfClimber ? -5 : SPRITE_WIDTH - 7),
+            row.rect.x,
+            row.rect.x + row.rect.width - 12,
+          ),
+        );
+        const gearY = Math.round(row.rect.y - 7);
+        context.fillStyle = '#101719';
+        context.fillRect(gearX - 1, gearY - 1, 14, 7);
+        context.fillStyle = '#16504d';
+        context.fillRect(gearX, gearY, 12, 5);
+        context.fillStyle = '#d7c693';
+        context.fillRect(gearX + 5, gearY, 2, 5);
+      }
+    }
   }
 
   #notify(force: boolean): void {

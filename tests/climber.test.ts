@@ -103,6 +103,16 @@ function hangingSimulation(): {
   return fixture;
 }
 
+function campedSimulation(): {
+  simulation: ClimberSimulation;
+  frames: FrameDriver;
+} {
+  const fixture = hangingSimulation();
+  advanceUntil(fixture.simulation, fixture.frames, 'camped', 240);
+  expect(fixture.simulation.hasFlag).toBe(true);
+  return fixture;
+}
+
 describe('ClimberSimulation attachment rules', () => {
   it('keeps hanging through normal interpolated mapped-row movement', () => {
     const { simulation, frames } = hangingSimulation();
@@ -222,6 +232,95 @@ describe('ClimberSimulation attachment rules', () => {
     expect(handY).toBeLessThanOrEqual(216 + 16 - HOLD_INSET);
     fitted.destroy();
   });
+  it('stays attached when an uncommitted route disappears at a dead end', () => {
+    const { simulation, frames } = hangingSimulation();
+    const candidate = rendererSnapshot(['NEW', 'A', 'B', 'C'], {
+      sampledAt: 100,
+    });
+    candidate.rows[0].rect = { x: 220, y: 180, width: 50, height: 16 };
+
+    simulation.setTerminalSnapshot(candidate);
+    frames.advance(16);
+    for (const sampledAt of [180, 260]) {
+      candidate.sampledAt = sampledAt;
+      simulation.setTerminalSnapshot(candidate);
+      frames.advance(16);
+    }
+    expect(simulation.state).toBe('shimmying');
+    simulation.setTerminalSnapshot(
+      rendererSnapshot(['A', 'B', 'C'], { sampledAt: 340 }),
+    );
+
+    expect(simulation.state).toBe('hanging');
+    for (let frame = 0; frame < 20; frame += 1) frames.advance(16);
+    expect(simulation.state).toBe('hanging');
+    simulation.destroy();
+  });
+
+
+  it('waits for a stable summit before mantling and planting a flag', () => {
+    const { simulation, frames } = hangingSimulation();
+
+    for (let frame = 0; frame < 70; frame += 1) frames.advance(16);
+    expect(simulation.state).toBe('hanging');
+    advanceUntil(simulation, frames, 'summiting', 10);
+    advanceUntil(simulation, frames, 'camped', 120);
+    expect(simulation.hasFlag).toBe(true);
+
+    simulation.destroy();
+  });
+
+  it('packs its campsite when a new reachable row appears above', () => {
+    const { simulation, frames } = campedSimulation();
+    const extended = rendererSnapshot(['NEW', 'A', 'B', 'C'], {
+      sampledAt: 100,
+    });
+    extended.rows[0].rect = { x: 0, y: 180, width: 300, height: 16 };
+
+    simulation.setTerminalSnapshot(extended);
+    frames.advance(16);
+    for (const sampledAt of [180, 260]) {
+      extended.sampledAt = sampledAt;
+      simulation.setTerminalSnapshot(extended);
+      frames.advance(16);
+    }
+    expect(simulation.state).toBe('packing');
+    advanceUntil(simulation, frames, 'hanging', 40);
+    expect(simulation.hasFlag).toBe(false);
+
+    simulation.destroy();
+  });
+
+  it('leaves a planted flag behind after a mouse knockoff', () => {
+    const { simulation } = campedSimulation();
+    const impactY = simulation.position.y + SPRITE_HEIGHT / 2;
+
+    simulation.handlePointerMove(
+      { x: simulation.position.x - 30, y: impactY },
+      0,
+    );
+    simulation.handlePointerMove(
+      { x: simulation.position.x + SPRITE_WIDTH + 30, y: impactY },
+      100,
+    );
+
+    expect(simulation.state).toBe('falling');
+    expect(simulation.hasFlag).toBe(true);
+    simulation.destroy();
+  });
+
+  it('removes the campsite when its summit row exits upward', () => {
+    const { simulation } = campedSimulation();
+
+    simulation.setTerminalSnapshot(
+      rendererSnapshot(['B', 'C', 'D'], { sampledAt: 80 }),
+    );
+
+    expect(simulation.state).toBe('falling');
+    expect(simulation.position.y).toBe(-SPRITE_HEIGHT);
+    expect(simulation.hasFlag).toBe(false);
+    simulation.destroy();
+  });
 
 });
 
@@ -242,6 +341,11 @@ describe('DOM-free climber motion reducer', () => {
       phaseElapsed: 0,
       travel: null,
       holdFollow: null,
+      summitStableElapsed: 0,
+      summitStartY: 0,
+      targetSnapshotCount: 0,
+      flagKey: null,
+      flagAnchorRatio: 0.84,
     };
   }
 
@@ -288,6 +392,10 @@ describe('DOM-free climber motion reducer', () => {
     expect(selectClimberSpriteCell('falling', 1_400, false, true)).toBe(14);
     expect(selectClimberSpriteCell('landing', 1_400, false, true)).toBe(18);
     expect(selectClimberSpriteCell('hanging', 1_400, true, true)).toBe(23);
+    expect(selectClimberSpriteCell('summiting', 0, false, true)).toBe(24);
+    expect(selectClimberSpriteCell('planting', 0, false, true)).toBe(26);
+    expect(selectClimberSpriteCell('camped', 1_400, false, true)).toBe(28);
+    expect(selectClimberSpriteCell('packing', 1_400, false, true)).toBe(31);
   });
 
 });
