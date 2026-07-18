@@ -1,0 +1,79 @@
+# Terminal Climber
+
+Terminal Climber is a transparent, always-on-top Windows desktop pet that climbs the visible text in the foreground terminal. It treats nonblank terminal rows as handholds, follows them while output scrolls, and falls when the cursor knocks it loose or the text moves too quickly.
+
+## Requirements
+
+- Windows 11 x64
+- Node.js and npm
+- A non-elevated Windows Terminal, OpenConsole, or classic Console Host window
+
+Third-party terminal emulators and elevated terminals are intentionally unsupported.
+
+## Install and run
+
+```powershell
+npm install
+npm run overlay
+```
+
+The overlay starts in mouse-passthrough mode, so terminal input remains uninterrupted. Press `Ctrl+Shift+O` to make its controls interactive.
+
+For development with Vite and Electron:
+
+```powershell
+npm run overlay:dev
+```
+
+## Controls
+
+| Action | Shortcut |
+| --- | --- |
+| Toggle mouse passthrough | `Ctrl+Shift+O` |
+| Pause or resume | `Ctrl+Alt+Shift+P` |
+| Reset the climber | `Ctrl+Alt+Shift+R` |
+
+The expanded status capsule also provides pause, reset, passthrough, and close buttons.
+
+## Behavior
+
+- Only the foreground supported terminal supplies handholds.
+- Blank rows are tracked for scroll reconciliation but cannot be climbed.
+- The climber launches from the display floor, hangs with both hands on visible text, shimmies into position, and climbs upward autonomously.
+- Ordinary scrolling carries an attached climber with its row.
+- A removed row, redraw, fast scroll, or fast cursor strike causes a fall.
+- When an attached row exits above the terminal viewport, the climber re-enters from the top of the physical display, falls to the display floor, lands, and restarts.
+- Focusing a nonterminal window for more than 500 ms releases the climber and leaves it pacing at the display bottom until tracking resumes.
+
+## Terminal access and privacy
+
+Terminal geometry comes from Windows UI Automation in a dedicated worker thread. The worker reads each visible row only long enough to trim its geometry and generate a session-scoped HMAC signature. Raw terminal text and the HMAC key never cross worker IPC, are never logged or persisted, and are discarded after each sample. The app does not use screenshots, OCR, shell hooks, or terminal-history files.
+
+## Verification
+
+Run the automated behavior suite and production build:
+
+```powershell
+npm test
+npm run build
+```
+
+To verify live UI Automation access, focus a supported terminal with at least three nonblank rows and run:
+
+```powershell
+npm run probe:uia
+```
+
+A successful probe prints only tracking status, an anonymous target identifier, the attachable-row count, and sample rectangles. It never prints terminal content.
+
+## Project structure
+
+- `electron/uia-bindings.cjs` — Koffi bindings for Windows UI Automation and native process/window APIs.
+- `electron/terminal-uia-worker.cjs` — foreground-terminal polling, row geometry, hashing, and COM lifetime management.
+- `electron/main.cjs` — overlay window, worker lifecycle, display conversion, shortcuts, and sanitized IPC.
+- `electron/preload.cjs` — narrow context-isolated renderer API.
+- `src/row-tracker.ts` — anonymous row reconciliation and scroll/redraw detection.
+- `src/climber.ts` — deterministic climber physics, state transitions, collision handling, and canvas rendering.
+- `src/main.ts` — renderer wiring, observable status, and controls.
+- `src/assets/climber-sprites.svg` — 24-frame pixel-art atlas.
+- `tests/` — row-tracking and climber behavior tests.
