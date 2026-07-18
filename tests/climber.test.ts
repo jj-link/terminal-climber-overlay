@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RendererTerminalSnapshot } from '../src/contracts';
 import {
-  CLIMB_LATERAL_STEP,
   ClimberSimulation,
   HAND_OFFSET_Y,
   HAND_SPREAD,
@@ -60,6 +59,7 @@ function rendererSnapshot(
     viewportRect: { x: 0, y: 0, width: 300, height: 250 },
     rows: signatures.map((signature, index) => ({
       index,
+      segmentIndex: 0,
       signature,
       attachable: true,
       rect: { x: 0, y, width: 300, height: 16 },
@@ -435,11 +435,11 @@ describe('DOM-free climber motion reducer', () => {
     expect(model.state).toBe('launching');
     expect(model.travel?.targetKey).toBe(terminal.rows[2].key);
   });
-  it('alternates deliberate lateral movement while climbing wide rows', () => {
-    const snapshot = rendererSnapshot(['current', 'middle', 'top']);
-    snapshot.rows[0].rect = { x: 0, y: 216, width: 300, height: 16 };
-    snapshot.rows[1].rect = { x: 0, y: 184, width: 300, height: 16 };
-    snapshot.rows[2].rect = { x: 0, y: 152, width: 300, height: 16 };
+
+  it('moves laterally only as required to reach the target text span', () => {
+    const snapshot = rendererSnapshot(['current', 'target']);
+    snapshot.rows[0].rect = { x: 80, y: 216, width: 100, height: 16 };
+    snapshot.rows[1].rect = { x: 150, y: 184, width: 80, height: 16 };
     const terminal = createTerminalSnapshot(snapshot);
     const holds = getAttachableRows(terminal);
     const model = fallingModel();
@@ -450,25 +450,29 @@ describe('DOM-free climber motion reducer', () => {
     model.attachedKey = holds[0].key;
     model.targetKey = holds[1].key;
     model.targetSnapshotCount = 3;
-    const initialHandX = model.x + SPRITE_WIDTH / 2;
 
     reduceClimberMotion(model, { holds }, 0.016);
+    expect(model.state).toBe('shimmying');
+    for (let frame = 0; frame < 10; frame += 1) {
+      reduceClimberMotion(model, { holds }, 0.05);
+    }
 
     expect(model.state).toBe('climbing');
     expect(model.travel?.targetHandX).toBe(
-      initialHandX + CLIMB_LATERAL_STEP,
+      snapshot.rows[1].rect.x + HOLD_INSET + HAND_SPREAD,
     );
     for (let frame = 0; frame < 9; frame += 1) {
       reduceClimberMotion(model, { holds }, 0.05);
     }
-    expect(model.state).toBe('hanging');
-
-    model.targetKey = holds[2].key;
-    model.targetSnapshotCount = 3;
-    reduceClimberMotion(model, { holds }, 0.016);
-
-    expect(model.state).toBe('climbing');
-    expect(model.travel?.targetHandX).toBe(initialHandX);
+    const handCenterX = model.x + SPRITE_WIDTH / 2;
+    expect(handCenterX - HAND_SPREAD).toBe(
+      snapshot.rows[1].rect.x + HOLD_INSET,
+    );
+    expect(handCenterX + HAND_SPREAD).toBeLessThanOrEqual(
+      snapshot.rows[1].rect.x +
+        snapshot.rows[1].rect.width -
+        HOLD_INSET,
+    );
   });
 
   it('freezes decorative atlas cycling without changing state-specific frames', () => {

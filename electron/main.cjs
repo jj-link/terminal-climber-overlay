@@ -125,11 +125,21 @@ function sanitizePhysicalSnapshot(value) {
   }
 
   const rows = [];
+  let previousIndex = -1;
+  let previousSegmentIndex = -1;
   for (let position = 0; position < value.rows.length; position += 1) {
     const row = value.rows[position];
     if (
       !isObject(row) ||
-      row.index !== position ||
+      !Number.isSafeInteger(row.index) ||
+      !Number.isSafeInteger(row.segmentIndex) ||
+      (position === 0
+        ? row.index !== 0 || row.segmentIndex !== 0
+        : !(
+            (row.index === previousIndex &&
+              row.segmentIndex === previousSegmentIndex + 1) ||
+            (row.index === previousIndex + 1 && row.segmentIndex === 0)
+          )) ||
       typeof row.signature !== 'string' ||
       !/^[0-9a-f]{16}$/i.test(row.signature) ||
       typeof row.attachable !== 'boolean' ||
@@ -138,8 +148,11 @@ function sanitizePhysicalSnapshot(value) {
     ) {
       return null;
     }
+    previousIndex = row.index;
+    previousSegmentIndex = row.segmentIndex;
     rows.push({
       index: row.index,
+      segmentIndex: row.segmentIndex,
       signature: row.signature.toLowerCase(),
       attachable: row.attachable,
       rectPx: {
@@ -274,6 +287,7 @@ function convertPhysicalSnapshot(snapshot) {
       : { x: 0, y: 0, width: 0, height: 0 };
     return {
       index: row.index,
+      segmentIndex: row.segmentIndex,
       signature: row.signature,
       attachable: row.attachable,
       rect,

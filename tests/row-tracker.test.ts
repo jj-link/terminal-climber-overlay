@@ -8,6 +8,8 @@ import {
 
 interface RowFixture {
   signature: string;
+  index?: number;
+  segmentIndex?: number;
   attachable?: boolean;
   x?: number;
   y?: number;
@@ -31,12 +33,13 @@ function snapshot(
     rows: rows.map((fixture, index) => {
       const row = typeof fixture === 'string' ? { signature: fixture } : fixture;
       return {
-        index,
+        index: row.index ?? index,
+        segmentIndex: row.segmentIndex ?? 0,
         signature: row.signature,
         attachable: row.attachable ?? true,
         rect: {
           x: row.x ?? 20,
-          y: row.y ?? index * 18,
+          y: row.y ?? (row.index ?? index) * 18,
           width: row.width ?? 120,
           height: row.height ?? 16,
         },
@@ -59,6 +62,34 @@ describe('reconcileRows', () => {
     expect(result.holdMovedTooFast).toBe(false);
     expect(result.mappedAttachedKey).toBeNull();
     expect(result.keyMappings.get(previous.rows[1].key)).toBe(
+      current.rows[0].key,
+    );
+  });
+
+  it('maps distinct text segments without collapsing their shared row index', () => {
+    const previous = snapshot([
+      { signature: 'top-left', index: 0, segmentIndex: 0 },
+      { signature: 'top-right', index: 0, segmentIndex: 1 },
+      { signature: 'held-left', index: 1, segmentIndex: 0 },
+      { signature: 'held-right', index: 1, segmentIndex: 1 },
+      { signature: 'lower-left', index: 2, segmentIndex: 0 },
+      { signature: 'lower-right', index: 2, segmentIndex: 1 },
+    ]);
+    const current = snapshot([
+      { signature: 'held-left', index: 0, segmentIndex: 0 },
+      { signature: 'held-right', index: 0, segmentIndex: 1 },
+      { signature: 'lower-left', index: 1, segmentIndex: 0 },
+      { signature: 'lower-right', index: 1, segmentIndex: 1 },
+      { signature: 'new-left', index: 2, segmentIndex: 0 },
+      { signature: 'new-right', index: 2, segmentIndex: 1 },
+    ]);
+
+    const result = reconcileRows(previous, current, previous.rows[3].key);
+
+    expect(result.status).toBe('scrolled');
+    expect(result.offset).toBe(-1);
+    expect(result.mappedAttachedKey).toBe(current.rows[1].key);
+    expect(result.keyMappings.get(previous.rows[2].key)).toBe(
       current.rows[0].key,
     );
   });

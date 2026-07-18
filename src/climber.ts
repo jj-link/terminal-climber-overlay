@@ -114,7 +114,6 @@ export const SPRITE_WIDTH = 40;
 export const SPRITE_HEIGHT = 52;
 export const GRAVITY = 1900;
 export const MAX_FALL_SPEED = 1450;
-export const CLIMB_LATERAL_STEP = 36;
 export const SHIMMY_SPEED = 92;
 export const CLIMB_DURATION = 0.42;
 export const LAUNCH_DURATION = 0.7;
@@ -341,7 +340,9 @@ function chooseNextHold(
       (verticalGap === bestVertical &&
         (horizontalMovement < bestHorizontal ||
           (horizontalMovement === bestHorizontal &&
-            candidate.index < best.index)))
+            (candidate.index < best.index ||
+              (candidate.index === best.index &&
+                candidate.segmentIndex < best.segmentIndex)))))
     ) {
       best = candidate;
       bestVertical = verticalGap;
@@ -385,30 +386,6 @@ function hasConfirmedNextHold(
   return model.targetSnapshotCount >= TARGET_CONFIRM_SNAPSHOTS;
 }
 
-function chooseTravelHandX(
-  model: ClimberMotionModel,
-  target: TerminalRow,
-): number {
-  const currentHandX = model.x + HAND_CENTER_OFFSET_X;
-  const minimum = minimumHandCenterX(target);
-  const maximum = maximumHandCenterX(target);
-  let direction = model.paceDirection;
-  let targetHandX = clamp(
-    currentHandX + direction * CLIMB_LATERAL_STEP,
-    minimum,
-    maximum,
-  );
-  if (Math.abs(targetHandX - currentHandX) < CLIMB_LATERAL_STEP / 3) {
-    direction = direction === 1 ? -1 : 1;
-    targetHandX = clamp(
-      currentHandX + direction * CLIMB_LATERAL_STEP,
-      minimum,
-      maximum,
-    );
-  }
-  model.paceDirection = direction === 1 ? -1 : 1;
-  return targetHandX;
-}
 
 function startTravel(
   model: ClimberMotionModel,
@@ -416,7 +393,11 @@ function startTravel(
   target: TerminalRow,
   duration: number,
 ): void {
-  const targetHandX = chooseTravelHandX(model, target);
+  const targetHandX = clamp(
+    model.x + HAND_CENTER_OFFSET_X,
+    minimumHandCenterX(target),
+    maximumHandCenterX(target),
+  );
   model.targetKey = target.key;
   model.travel = {
     kind,

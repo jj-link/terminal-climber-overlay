@@ -38,6 +38,26 @@ function sanitizeRect(rect) {
   return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
 }
 
+function textRunGeometry(trimmedText, rect) {
+  if (!trimmedText || !finitePositiveRect(rect)) return [];
+  const runs = [];
+  for (const match of trimmedText.matchAll(/\S+/gu)) {
+    const start = match.index;
+    const length = match[0].length;
+    runs.push({
+      start,
+      length,
+      rect: {
+        x: rect.x + rect.width * (start / trimmedText.length),
+        y: rect.y,
+        width: rect.width * (length / trimmedText.length),
+        height: rect.height,
+      },
+    });
+  }
+  return runs;
+}
+
 function statusForError(error) {
   if (error instanceof UIAError) {
     if (error.kind === 'access-denied') {
@@ -208,6 +228,15 @@ class TerminalUIAWorker {
       .slice(0, 16);
   }
 
+  hashSegment(segmentText, segmentIndex) {
+    return crypto.createHmac('sha256', this.sessionKey)
+      .update(String(segmentIndex), 'utf8')
+      .update('\0', 'utf8')
+      .update(segmentText, 'utf8')
+      .digest('hex')
+      .slice(0, 16);
+  }
+
   enumerateRows(pattern) {
     let rangeArray = null;
     const candidates = [];
@@ -264,25 +293,51 @@ class TerminalUIAWorker {
       return left.ordinal - right.ordinal;
     });
 
-    const viewportRectPx = unionRectangles(candidates.map((row) => row.fullRect).filter(Boolean));
-    const rows = candidates.map((candidate, index) => ({
-      index,
-      signature: candidate.signature,
-      attachable: candidate.attachable && finitePositiveRect(candidate.rect),
-      rectPx: sanitizeRect(candidate.rect ?? candidate.fullRect),
-    }));
+    const viewportRectPx = unionRectangles(
+      candidates.map((row) => row.fullRect).filter(Boolean),
+    );
+    const rows = [];
+    for (let index = 0; index < candidates.length; index += 1) {
+      const candidate = candidates[index];
+      if (candidate.segments.length === 0) {
+        rows.push({
+          index,
+          segmentIndex: 0,
+          signature: candidate.signature,
+          attachable: false,
+          rectPx: sanitizeRect(candidate.fullRect),
+        });
+        continue;
+      }
+      for (
+        let segmentIndex = 0;
+        segmentIndex < candidate.segments.length;
+        segmentIndex += 1
+      ) {
+        const segment = candidate.segments[segmentIndex];
+        rows.push({
+          index,
+          segmentIndex,
+          signature: segment.signature,
+          attachable: finitePositiveRect(segment.rect),
+          rectPx: sanitizeRect(segment.rect),
+        });
+      }
+    }
     return { rows, viewportRectPx };
   }
 
   captureRow(cursor, candidates, ordinal) {
     let completeRowText = null;
     let trimmedText = null;
+    let segmentText = null;
     let trimmedRange = null;
     try {
       completeRowText = this.bindings.getText(cursor);
       const signature = this.hashRow(completeRowText);
       trimmedText = completeRowText.trim();
       let fullRect = null;
+      let hasTrimmedGeometry = false;
       try {
         fullRect = unionRectangles(this.bindings.getBoundingRectangles(cursor));
       } catch (error) {
@@ -294,7 +349,13 @@ class TerminalUIAWorker {
         try {
           trimmedRange = this.bindings.findText(cursor, trimmedText);
           if (trimmedRange) {
-            rect = unionRectangles(this.bindings.getBoundingRectangles(trimmedRange)) ?? fullRect;
+            const trimmedRect = unionRectangles(
+              this.bindings.getBoundingRectangles(trimmedRange),
+            );
+            if (trimmedRect) {
+              rect = trimmedRect;
+              hasTrimmedGeometry = true;
+            }
           }
         } catch (error) {
           if (!(error instanceof UIAError) ||
@@ -302,18 +363,32 @@ class TerminalUIAWorker {
           rect = fullRect;
         }
       }
+      const segments = [];
+      if (trimmedText.length > 0 && finitePositiveRect(rect)) {
+        const geometry = hasTrimmedGeometry
+          ? textRunGeometry(trimmedText, rect)
+          : [{ start: 0, length: trimmedText.length, rect }];
+        for (let segmentIndex = 0; segmentIndex < geometry.length; segmentIndex += 1) {
+          const run = geometry[segmentIndex];
+          segmentText = trimmedText.slice(run.start, run.start + run.length);
+          segments.push({
+            signature: this.hashSegment(segmentText, segmentIndex),
+            rect: run.rect,
+          });
+        }
+      }
       candidates.push({
         ordinal,
         signature,
-        attachable: trimmedText.length > 0,
-        rect,
+        segments,
         fullRect,
       });
     } finally {
       if (trimmedRange) this.bindings.release(trimmedRange);
-      // Drop all references before another native call. Neither string crosses
-      // the worker boundary, and neither is logged or persisted.
+      // Drop all text references before another native call. No text crosses
+      // the worker boundary, and none is logged or persisted.
       trimmedText = null;
+      segmentText = null;
       completeRowText = null;
     }
   }
@@ -374,6 +449,7 @@ module.exports = {
   TerminalUIAWorker,
   finitePositiveRect,
   isStatusMessage,
+  textRunGeometry,
   smokeWorker,
   statusForError,
 };

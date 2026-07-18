@@ -41,7 +41,7 @@ export function createTerminalSnapshot(
     ...snapshot,
     rows: snapshot.rows.map((row) => ({
       ...row,
-      key: `${snapshot.targetId}:${row.index}:${row.signature}`,
+      key: `${snapshot.targetId}:${row.index}:${row.segmentIndex}:${row.signature}`,
     })),
   };
 }
@@ -71,8 +71,17 @@ interface OffsetScore {
   evidence: number;
 }
 
-function rowMap(snapshot: TerminalSnapshot): Map<number, TerminalRow> {
-  return new Map(snapshot.rows.map((row) => [row.index, row]));
+function rowLocator(index: number, segmentIndex: number): string {
+  return `${index}:${segmentIndex}`;
+}
+
+function rowMap(snapshot: TerminalSnapshot): Map<string, TerminalRow> {
+  return new Map(
+    snapshot.rows.map((row) => [
+      rowLocator(row.index, row.segmentIndex),
+      row,
+    ]),
+  );
 }
 
 function signatureCounts(rows: readonly TerminalRow[]): Map<string, number> {
@@ -86,16 +95,37 @@ function signatureCounts(rows: readonly TerminalRow[]): Map<string, number> {
 }
 
 function neighborAgreement(
-  oldRows: ReadonlyMap<number, TerminalRow>,
-  newRows: ReadonlyMap<number, TerminalRow>,
-  oldIndex: number,
-  newIndex: number,
+  oldRows: ReadonlyMap<string, TerminalRow>,
+  newRows: ReadonlyMap<string, TerminalRow>,
+  oldRow: TerminalRow,
+  newRow: TerminalRow,
 ): number {
   let agreements = 0;
   for (const direction of [-1, 1] as const) {
-    const oldNeighbor = oldRows.get(oldIndex + direction);
-    const newNeighbor = newRows.get(newIndex + direction);
-    if (oldNeighbor && newNeighbor && oldNeighbor.signature === newNeighbor.signature) {
+    const oldSegmentNeighbor = oldRows.get(
+      rowLocator(oldRow.index, oldRow.segmentIndex + direction),
+    );
+    const newSegmentNeighbor = newRows.get(
+      rowLocator(newRow.index, newRow.segmentIndex + direction),
+    );
+    if (
+      oldSegmentNeighbor &&
+      newSegmentNeighbor &&
+      oldSegmentNeighbor.signature === newSegmentNeighbor.signature
+    ) {
+      agreements += 1;
+    }
+    const oldLineNeighbor = oldRows.get(
+      rowLocator(oldRow.index + direction, oldRow.segmentIndex),
+    );
+    const newLineNeighbor = newRows.get(
+      rowLocator(newRow.index + direction, newRow.segmentIndex),
+    );
+    if (
+      oldLineNeighbor &&
+      newLineNeighbor &&
+      oldLineNeighbor.signature === newLineNeighbor.signature
+    ) {
       agreements += 1;
     }
   }
@@ -104,8 +134,8 @@ function neighborAgreement(
 
 function scoreOffset(
   offset: number,
-  oldRows: ReadonlyMap<number, TerminalRow>,
-  newRows: ReadonlyMap<number, TerminalRow>,
+  oldRows: ReadonlyMap<string, TerminalRow>,
+  newRows: ReadonlyMap<string, TerminalRow>,
   oldCounts: ReadonlyMap<string, number>,
   newCounts: ReadonlyMap<string, number>,
 ): OffsetScore {
@@ -114,15 +144,12 @@ function scoreOffset(
 
   for (const oldRow of oldRows.values()) {
     if (!oldRow.attachable) continue;
-    const newRow = newRows.get(oldRow.index + offset);
+    const newRow = newRows.get(
+      rowLocator(oldRow.index + offset, oldRow.segmentIndex),
+    );
     if (!newRow?.attachable || newRow.signature !== oldRow.signature) continue;
 
-    const agreement = neighborAgreement(
-      oldRows,
-      newRows,
-      oldRow.index,
-      newRow.index,
-    );
+    const agreement = neighborAgreement(oldRows, newRows, oldRow, newRow);
     const duplicated =
       (oldCounts.get(oldRow.signature) ?? 0) > 1 ||
       (newCounts.get(oldRow.signature) ?? 0) > 1;
@@ -163,7 +190,9 @@ function acceptedMappings(
   const mappings = new Map<string, string>();
 
   for (const oldRow of previous.rows) {
-    const nextRow = nextByIndex.get(oldRow.index + offset);
+    const nextRow = nextByIndex.get(
+      rowLocator(oldRow.index + offset, oldRow.segmentIndex),
+    );
     if (!nextRow || nextRow.signature !== oldRow.signature) continue;
 
     if (oldRow.attachable || nextRow.attachable) {
@@ -173,8 +202,7 @@ function acceptedMappings(
         (newCounts.get(oldRow.signature) ?? 0) > 1;
       if (
         duplicated &&
-        neighborAgreement(oldByIndex, nextByIndex, oldRow.index, nextRow.index) ===
-          0
+        neighborAgreement(oldByIndex, nextByIndex, oldRow, nextRow) === 0
       ) {
         continue;
       }
@@ -213,7 +241,7 @@ function attachmentFallback(
   const oldByIndex = rowMap(previous);
   const nextByIndex = rowMap(current);
   if (
-    neighborAgreement(oldByIndex, nextByIndex, oldRow.index, nextRow.index) < 1
+    neighborAgreement(oldByIndex, nextByIndex, oldRow, nextRow) < 1
   ) {
     return mappings;
   }

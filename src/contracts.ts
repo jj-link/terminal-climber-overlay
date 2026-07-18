@@ -16,6 +16,7 @@ export interface Rect {
 
 export interface PhysicalTerminalRow {
   index: number;
+  segmentIndex: number;
   signature: string;
   attachable: boolean;
   rectPx: Rect;
@@ -37,6 +38,7 @@ export interface TerminalStatusMessage {
 
 export interface RendererTerminalRow {
   index: number;
+  segmentIndex: number;
   signature: string;
   attachable: boolean;
   rect: Rect;

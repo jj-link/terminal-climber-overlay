@@ -1,6 +1,6 @@
 # Terminal Climber
 
-Terminal Climber is a transparent, always-on-top Windows desktop pet that climbs the visible text in the foreground terminal. It treats nonblank terminal rows as handholds, follows them while output scrolls, and falls when the cursor knocks it loose or the text moves too quickly.
+Terminal Climber is a transparent, always-on-top Windows desktop pet that climbs the visible text in the foreground terminal. It treats contiguous text spans as handholds, follows them while output scrolls, and falls when the cursor knocks it loose or the text moves too quickly.
 
 ## Requirements
 
@@ -38,6 +38,7 @@ The expanded status capsule also provides pause, reset, passthrough, and close b
 ## Behavior
 
 - Only the foreground supported terminal supplies handholds.
+- Each contiguous non-whitespace span has its own hold geometry; the gaps between words are not climbable.
 - Blank rows are tracked for scroll reconciliation but cannot be climbed.
 - The climber launches from the display floor, hangs with both hands on visible text, shimmies into position, and climbs upward autonomously.
 - Ordinary scrolling carries an attached climber with its row.
@@ -49,7 +50,7 @@ The expanded status capsule also provides pause, reset, passthrough, and close b
 
 ## Terminal access and privacy
 
-Terminal geometry comes from Windows UI Automation in a dedicated worker thread. The worker reads each visible row only long enough to trim its geometry and generate a session-scoped HMAC signature. Raw terminal text and the HMAC key never cross worker IPC, are never logged or persisted, and are discarded after each sample. The app does not use screenshots, OCR, shell hooks, or terminal-history files.
+Terminal geometry comes from Windows UI Automation in a dedicated worker thread. The worker reads each visible row only long enough to derive its text-span geometry and generate session-scoped HMAC signatures. Raw terminal text and the HMAC key never cross worker IPC, are never logged or persisted, and are discarded after each sample. The app does not use screenshots, OCR, shell hooks, or terminal-history files.
 
 ## Verification
 
@@ -74,7 +75,7 @@ A successful probe prints only tracking status, an anonymous target identifier, 
 - `electron/terminal-uia-worker.cjs` — foreground-terminal polling, row geometry, hashing, and COM lifetime management.
 - `electron/main.cjs` — overlay window, worker lifecycle, display conversion, shortcuts, and sanitized IPC.
 - `electron/preload.cjs` — narrow context-isolated renderer API.
-- `src/row-tracker.ts` — anonymous row reconciliation and scroll/redraw detection.
+- `src/row-tracker.ts` — anonymous row/segment reconciliation and scroll/redraw detection.
 - `src/climber.ts` — deterministic climber physics, state transitions, collision handling, and canvas rendering.
 - `src/main.ts` — renderer wiring, observable status, and controls.
 - `src/assets/climber-sprites.svg` — 32-frame pixel-art atlas, including summit and campsite poses.
