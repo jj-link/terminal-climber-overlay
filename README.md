@@ -43,6 +43,8 @@ The expanded status capsule also provides pause, reset, passthrough, and close b
 - Ordinary scrolling carries an attached climber with its row.
 - A removed row, redraw, fast scroll, or fast cursor strike causes a fall.
 - When an attached row exits above the terminal viewport, the climber re-enters from the top of the physical display, falls to the display floor, lands, and restarts.
+- At a stable route summit, the climber mantles onto the text, plants a flag, and camps. A newly confirmed handhold makes it pack up and resume climbing.
+- A cursor knockoff leaves the flag behind. The campsite is cleared when its row disappears, the terminal target changes, or the climber is reset.
 - Focusing a nonterminal window for more than 500 ms releases the climber and leaves it pacing at the display bottom until tracking resumes.
 
 ## Terminal access and privacy
@@ -75,5 +77,5 @@ A successful probe prints only tracking status, an anonymous target identifier, 
 - `src/row-tracker.ts` — anonymous row reconciliation and scroll/redraw detection.
 - `src/climber.ts` — deterministic climber physics, state transitions, collision handling, and canvas rendering.
 - `src/main.ts` — renderer wiring, observable status, and controls.
-- `src/assets/climber-sprites.svg` — 24-frame pixel-art atlas.
+- `src/assets/climber-sprites.svg` — 32-frame pixel-art atlas, including summit and campsite poses.
 - `tests/` — row-tracking and climber behavior tests.
