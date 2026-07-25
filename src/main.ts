@@ -51,6 +51,7 @@ const climberLabels: Record<ClimberState, string> = {
   camped: 'Camped',
   packing: 'Packing camp',
   falling: 'Falling',
+  slipping: 'Slipping',
   landing: 'Landing',
   paused: 'Paused',
 };

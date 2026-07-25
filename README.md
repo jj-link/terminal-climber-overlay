@@ -40,12 +40,13 @@ The expanded status capsule also provides pause, reset, passthrough, and close b
 - Only the foreground supported terminal supplies handholds.
 - Each contiguous non-whitespace span has its own hold geometry; the gaps between words are not climbable.
 - Blank rows are tracked for scroll reconciliation but cannot be climbed.
-- The climber launches from the display floor, hangs with both hands on visible text, shimmies into position, and climbs upward autonomously.
-- Ordinary scrolling carries an attached climber with its row.
-- A removed row, redraw, fast scroll, or fast cursor strike causes a fall.
+- The climber launches from the display floor, uses both hands on wide text spans, and braces with one hand on narrow spans.
+- A short lookahead prefers a reachable hold that keeps a route open instead of greedily choosing a dead end.
+- Ordinary scrolling carries each anchored hand with its row.
+- A removed row or redraw causes a fall. A fast output burst first lets one hand slip; a continuing burst releases the second hand and falls.
 - When an attached row exits above the terminal viewport, the climber re-enters from the top of the physical display, falls to the display floor, lands, and restarts.
 - Only a stable, topmost terminal row counts as a summit. There the climber mantles onto the text, plants a flag, and camps; a newly confirmed handhold makes it pack up and resume climbing.
-- A cursor knockoff leaves the flag behind. The campsite is cleared when its row disappears, the terminal target changes, or the climber is reset.
+- A fast cursor sweep makes one hand slip when the other can brace; the climber recovers on the hold. A one-handed climber falls on a fast strike. The campsite is cleared when its row disappears, the terminal target changes, or the climber is reset.
 - Focusing a nonterminal window for more than 500 ms releases the climber and leaves it pacing at the display bottom until tracking resumes.
 
 ## Terminal access and privacy

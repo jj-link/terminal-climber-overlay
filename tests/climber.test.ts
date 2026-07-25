@@ -9,10 +9,15 @@ import {
   SPRITE_HEIGHT,
   SPRITE_WIDTH,
   isUsableClimberHold,
+  isUsableHandHold,
   reduceClimberMotion,
   selectClimberSpriteCell,
   type ClimberMotionModel,
 } from '../src/climber';
+import {
+  createClimberMotionModel,
+  resetClimberMotionModel,
+} from '../src/climber-model';
 import { createTerminalSnapshot, getAttachableRows } from '../src/row-tracker';
 
 class FrameDriver {
@@ -131,7 +136,7 @@ describe('ClimberSimulation attachment rules', () => {
     simulation.destroy();
   });
 
-  it('falls instead of teleporting when the held row exceeds 750 DIP/s', () => {
+  it('braces one hand during a fast output burst before falling', () => {
     const { simulation } = hangingSimulation();
 
     simulation.setTerminalSnapshot(
@@ -141,11 +146,18 @@ describe('ClimberSimulation attachment rules', () => {
       }),
     );
 
+    expect(simulation.state).toBe('slipping');
+    simulation.setTerminalSnapshot(
+      rendererSnapshot(['A', 'B', 'C'], {
+        sampledAt: 200,
+        y: 416,
+      }),
+    );
     expect(simulation.state).toBe('falling');
     simulation.destroy();
   });
 
-  it('dodges a slow cursor segment and detaches with fast horizontal impulse', () => {
+  it('dodges a slow cursor segment and slips one hand on a fast sweep', () => {
     const slow = hangingSimulation();
     const slowY = slow.simulation.position.y + SPRITE_HEIGHT / 2;
     slow.simulation.handlePointerMove({ x: 100, y: slowY }, 0);
@@ -155,12 +167,11 @@ describe('ClimberSimulation attachment rules', () => {
 
     const fast = hangingSimulation();
     const fastY = fast.simulation.position.y + SPRITE_HEIGHT / 2;
-    const impactX = fast.simulation.position.x;
     fast.simulation.handlePointerMove({ x: 100, y: fastY }, 0);
     fast.simulation.handlePointerMove({ x: 200, y: fastY }, 100);
-    expect(fast.simulation.state).toBe('falling');
-    fast.frames.advance(50);
-    expect(fast.simulation.position.x).toBeGreaterThan(impactX);
+    expect(fast.simulation.state).toBe('slipping');
+    for (let frame = 0; frame < 6; frame += 1) fast.frames.advance(50);
+    expect(fast.simulation.state).toBe('hanging');
     fast.simulation.destroy();
   });
 
@@ -187,11 +198,14 @@ describe('ClimberSimulation attachment rules', () => {
 
     simulation.destroy();
   });
-  it('requires both hand anchors to fit inside a three-DIP inset', () => {
+  it('uses a narrow text span for one hand and a wider span for both', () => {
     const narrowSnapshot = rendererSnapshot();
     for (const row of narrowSnapshot.rows) {
       row.rect = { x: 100, y: 216, width: 23, height: 16 };
     }
+    const narrowRows = getAttachableRows(createTerminalSnapshot(narrowSnapshot));
+    expect(narrowRows.every(isUsableHandHold)).toBe(true);
+    expect(narrowRows.every(isUsableClimberHold)).toBe(false);
     const narrowFrames = new FrameDriver();
     const narrow = new ClimberSimulation({
       canvas: null,
@@ -201,9 +215,9 @@ describe('ClimberSimulation attachment rules', () => {
       cancelAnimationFrame: narrowFrames.cancel,
     });
     narrow.setTerminalSnapshot(narrowSnapshot);
-    expect(narrow.holdCount).toBe(0);
-    for (let frame = 0; frame < 20; frame += 1) narrowFrames.advance(16);
-    expect(narrow.state).toBe('grounded');
+    expect(narrow.holdCount).toBe(3);
+    advanceUntil(narrow, narrowFrames, 'hanging', 160);
+    expect(narrow.state).toBe('hanging');
     narrow.destroy();
 
     const fittedSnapshot = rendererSnapshot();
@@ -340,7 +354,7 @@ describe('ClimberSimulation attachment rules', () => {
     simulation.destroy();
   });
 
-  it('leaves a planted flag behind after a mouse knockoff', () => {
+  it('leaves a planted flag behind while one hand slips', () => {
     const { simulation } = campedSimulation();
     const impactY = simulation.position.y + SPRITE_HEIGHT / 2;
 
@@ -353,7 +367,7 @@ describe('ClimberSimulation attachment rules', () => {
       100,
     );
 
-    expect(simulation.state).toBe('falling');
+    expect(simulation.state).toBe('slipping');
     expect(simulation.hasFlag).toBe(true);
     simulation.destroy();
   });
@@ -387,6 +401,10 @@ describe('DOM-free climber motion reducer', () => {
       paceDirection: 1,
       attachedKey: null,
       targetKey: null,
+      leftHand: { key: null, x: 111, y: 187 },
+      rightHand: { key: null, x: 129, y: 187 },
+      slip: null,
+      routePlanKeys: [],
       phaseElapsed: 0,
       travel: null,
       holdFollow: null,
@@ -399,6 +417,72 @@ describe('DOM-free climber motion reducer', () => {
       flagAnchorRatio: 0.84,
     };
   }
+
+  it('keeps separate hand anchors for narrow and wide text spans', () => {
+    const wideSnapshot = rendererSnapshot(['wide']);
+    wideSnapshot.rows[0].rect = { x: 100, y: 216, width: 24, height: 16 };
+    const wideRows = getAttachableRows(createTerminalSnapshot(wideSnapshot));
+    const wideModel = fallingModel();
+    wideModel.state = 'grounded';
+    wideModel.resumeState = 'grounded';
+    wideModel.x = 92;
+    for (
+      let frame = 0;
+      frame < 60 && (wideModel.state as string) !== 'hanging';
+      frame += 1
+    ) {
+      reduceClimberMotion(wideModel, { holds: wideRows }, 0.016);
+    }
+    expect(wideModel.state).toBe('hanging');
+    expect(wideModel.leftHand.key).toBe(wideRows[0].key);
+    expect(wideModel.rightHand.key).toBe(wideRows[0].key);
+
+    const narrowSnapshot = rendererSnapshot(['narrow']);
+    narrowSnapshot.rows[0].rect = { x: 100, y: 216, width: 23, height: 16 };
+    const narrowRows = getAttachableRows(createTerminalSnapshot(narrowSnapshot));
+    const narrowModel = fallingModel();
+    narrowModel.state = 'grounded';
+    narrowModel.resumeState = 'grounded';
+    narrowModel.x = 100;
+    for (
+      let frame = 0;
+      frame < 60 && (narrowModel.state as string) !== 'hanging';
+      frame += 1
+    ) {
+      reduceClimberMotion(narrowModel, { holds: narrowRows }, 0.016);
+    }
+    expect(narrowModel.state).toBe('hanging');
+    expect(
+      Number(narrowModel.leftHand.key !== null) +
+        Number(narrowModel.rightHand.key !== null),
+    ).toBe(1);
+  });
+
+  it('selects a slightly farther hold when it opens a short route', () => {
+    const snapshot = rendererSnapshot([
+      'current',
+      'near-dead-end',
+      'branch',
+      'branch-top',
+    ]);
+    snapshot.rows[0].rect = { x: 100, y: 216, width: 60, height: 16 };
+    snapshot.rows[1].rect = { x: 140, y: 184, width: 30, height: 16 };
+    snapshot.rows[2].rect = { x: 0, y: 184, width: 30, height: 16 };
+    snapshot.rows[3].rect = { x: 0, y: 152, width: 30, height: 16 };
+    const holds = getAttachableRows(createTerminalSnapshot(snapshot));
+    const model = fallingModel();
+    model.state = 'hanging';
+    model.resumeState = 'hanging';
+    model.x = 110;
+    model.y = 200;
+    model.attachedKey = holds[0].key;
+    model.leftHand = { key: holds[0].key, x: 121, y: 224 };
+    model.rightHand = { key: holds[0].key, x: 139, y: 224 };
+
+    reduceClimberMotion(model, { holds }, 0.016);
+
+    expect(model.targetKey).toBe(holds[2].key);
+  });
 
   it('never catches an intermediate hold while falling', () => {
     const terminal = createTerminalSnapshot(rendererSnapshot(['A', 'B', 'C']));
@@ -496,4 +580,112 @@ describe('DOM-free climber motion reducer', () => {
     expect(selectClimberSpriteCell('packing', 1_400, false, true)).toBe(31);
   });
 
+  it('non-reduced falling cycles through cells 14-17 at 140 ms cadence', () => {
+    expect(selectClimberSpriteCell('falling', 0, false, false)).toBe(14);
+    expect(selectClimberSpriteCell('falling', 140, false, false)).toBe(15);
+    expect(selectClimberSpriteCell('falling', 280, false, false)).toBe(16);
+    expect(selectClimberSpriteCell('falling', 420, false, false)).toBe(17);
+    expect(selectClimberSpriteCell('falling', 560, false, false)).toBe(14);
+  });
+
+});
+
+describe('slipping-hand sprite selection', () => {
+  it('left-hand slipping selects cells 4 then 5 at 140 ms cadence', () => {
+    expect(selectClimberSpriteCell('slipping', 0, false, false, 0, 'left')).toBe(4);
+    expect(selectClimberSpriteCell('slipping', 140, false, false, 0, 'left')).toBe(5);
+    expect(selectClimberSpriteCell('slipping', 280, false, false, 0, 'left')).toBe(4);
+  });
+
+  it('right-hand slipping selects cells 6 then 7 at 140 ms cadence', () => {
+    expect(selectClimberSpriteCell('slipping', 0, false, false, 0, 'right')).toBe(6);
+    expect(selectClimberSpriteCell('slipping', 140, false, false, 0, 'right')).toBe(7);
+    expect(selectClimberSpriteCell('slipping', 280, false, false, 0, 'right')).toBe(6);
+  });
+
+  it('reduced motion freezes on cell 4 for left and 6 for right slipping', () => {
+    expect(selectClimberSpriteCell('slipping', 0, false, true, 0, 'left')).toBe(4);
+    expect(selectClimberSpriteCell('slipping', 140, false, true, 0, 'left')).toBe(4);
+    expect(selectClimberSpriteCell('slipping', 0, false, true, 0, 'right')).toBe(6);
+    expect(selectClimberSpriteCell('slipping', 140, false, true, 0, 'right')).toBe(6);
+  });
+
+  it('fallback to cell 0 when no slippingHand is provided', () => {
+    expect(selectClimberSpriteCell('slipping', 0, false, false, 0)).toBe(0);
+    expect(selectClimberSpriteCell('slipping', 0, false, false, 0, undefined)).toBe(0);
+  });
+});
+
+describe('climber motion model factory', () => {
+  it('createClimberMotionModel produces separate hand anchors and route array', () => {
+    const model = createClimberMotionModel(300, 300);
+    expect(model.state).toBe('grounded');
+    expect(model.leftHand.key).toBeNull();
+    expect(model.rightHand.key).toBeNull();
+    expect(model.slip).toBeNull();
+    expect(model.routePlanKeys).toEqual([]);
+    expect(model.x).toBe((300 - SPRITE_WIDTH) / 2);
+    expect(model.y).toBe(300 - SPRITE_HEIGHT);
+    expect(model.leftHand.x).toBe(300 / 2 - HAND_SPREAD);
+    expect(model.rightHand.x).toBe(300 / 2 + HAND_SPREAD);
+    expect(model.flagKey).toBeNull();
+  });
+
+  it('resetClimberMotionModel clears hand anchors, slip, route, travel, follow, flag', () => {
+    const model = createClimberMotionModel(300, 300);
+    model.state = 'hanging';
+    model.resumeState = 'hanging';
+    model.attachedKey = 'some-key';
+    model.leftHand = { key: 'k1', x: 100, y: 200 };
+    model.rightHand = { key: 'k1', x: 118, y: 200 };
+    model.slip = { side: 'left', x: 100, y: 200, elapsed: 0.1, duration: 0.28, vx: 0, vy: 70 };
+    model.routePlanKeys = ['r1', 'r2'];
+    model.travel = { kind: 'climb', targetKey: 't1', leadHand: 'right', trailingKey: 'k1', startX: 0, startY: 0, startLeadX: 0, startLeadY: 0, targetBodyX: 0, targetHandX: 0, targetHandY: 0, elapsed: 0, duration: 0.42 };
+    model.holdFollow = { startX: 0, startY: 0, targetX: 0, targetY: 0, handStart: { left: { x: 0, y: 0 }, right: { x: 0, y: 0 } }, handTarget: { left: { x: 0, y: 0 }, right: { x: 0, y: 0 } }, elapsed: 0, duration: 0.15 };
+    model.flagKey = 'f1';
+    model.flagAnchorRatio = 0.5;
+
+    resetClimberMotionModel(model);
+
+    expect(model.state).toBe('grounded');
+    expect(model.leftHand.key).toBeNull();
+    expect(model.rightHand.key).toBeNull();
+    expect(model.slip).toBeNull();
+    expect(model.routePlanKeys).toEqual([]);
+    expect(model.attachedKey).toBeNull();
+    expect(model.travel).toBeNull();
+    expect(model.holdFollow).toBeNull();
+    expect(model.flagKey).toBeNull();
+  });
+
+  it('display dimensions survive reset', () => {
+    const model = createClimberMotionModel(400, 200);
+    expect(model.displayWidth).toBe(400);
+    expect(model.displayHeight).toBe(200);
+    model.x = 500;
+    model.y = 100;
+    resetClimberMotionModel(model);
+    expect(model.displayWidth).toBe(400);
+    expect(model.displayHeight).toBe(200);
+  });
+
+  it('two models have distinct left/right anchors and route arrays (identity isolation)', () => {
+    const a = createClimberMotionModel(300, 300);
+    const b = createClimberMotionModel(400, 400);
+
+    // Distinct anchor positions from different display sizes
+    expect(a.leftHand.x).not.toBe(b.leftHand.x);
+    expect(a.rightHand.x).not.toBe(b.rightHand.x);
+    expect(a.leftHand).not.toBe(b.leftHand);
+    expect(a.rightHand).not.toBe(b.rightHand);
+
+    // Distinct route arrays
+    expect(a.routePlanKeys).not.toBe(b.routePlanKeys);
+
+    // Mutating one model must not affect the other
+    a.leftHand.x = 999;
+    a.routePlanKeys.push('test-key');
+    expect(b.leftHand.x).not.toBe(999);
+    expect(b.routePlanKeys).toEqual([]);
+  });
 });
