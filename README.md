@@ -19,6 +19,13 @@ npm run overlay
 
 The overlay starts in mouse-passthrough mode, so terminal input remains uninterrupted. Press `Ctrl+Shift+O` to make its controls interactive.
 
+If another application claims one of the global shortcuts, the overlay will
+report the conflict at startup and leave mouse interaction enabled so the
+on-screen controls remain reachable. Only one overlay instance runs at a time;
+subsequent launch attempts restore or reveal the existing window. When mouse
+passthrough is enabled, the overlay remains inactive so terminal focus is not
+stolen.
+
 For development with Vite and Electron:
 
 ```powershell
@@ -74,7 +81,8 @@ A successful probe prints only tracking status, an anonymous target identifier, 
 
 - `electron/uia-bindings.cjs` — Koffi bindings for Windows UI Automation and native process/window APIs.
 - `electron/terminal-uia-worker.cjs` — foreground-terminal polling, row geometry, hashing, and COM lifetime management.
-- `electron/main.cjs` — overlay window, worker lifecycle, display conversion, shortcuts, and sanitized IPC.
+- `electron/global-controls.cjs` — global-shortcut registration with conflict detection and safe fallbacks.
+- `electron/main.cjs` — overlay window, worker lifecycle, display conversion, single-instance guard, and sanitized IPC.
 - `electron/preload.cjs` — narrow context-isolated renderer API.
 - `src/row-tracker.ts` — anonymous row/segment reconciliation and scroll/redraw detection.
 - `src/climber.ts` — deterministic climber physics, state transitions, collision handling, and canvas rendering.

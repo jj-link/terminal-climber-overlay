@@ -279,7 +279,8 @@ button {
 }
 
 #app[data-backend-status="initializing"] [data-status-message="initializing"],
-#app[data-backend-status="tracking"] [data-status-message="tracking"],
+#app[data-backend-status="tracking"][data-click-through="true"] [data-status-message="tracking"],
+#app[data-backend-status="tracking"][data-click-through="false"] [data-status-message="tracking-controls-active"],
 #app[data-backend-status="no-terminal"] [data-status-message="no-terminal"],
 #app[data-backend-status="unsupported-terminal"] [data-status-message="unsupported-terminal"],
 #app[data-backend-status="elevated-terminal"] [data-status-message="elevated-terminal"],
@@ -363,6 +364,19 @@ button {
   border-style: solid;
   border-width: var(--space-1) var(--space-0) var(--space-1) var(--space-1);
   background: transparent;
+}
+
+.status-control[disabled] {
+  cursor: default;
+  opacity: 0.35;
+}
+
+.status-control[disabled]:hover,
+.status-control[disabled]:active {
+  color: inherit;
+  background: var(--surface-control);
+  border-color: var(--border-capsule);
+  transform: none;
 }
 
 .control-glyph {

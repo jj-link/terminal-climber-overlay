@@ -57,6 +57,7 @@ export interface OverlayState {
   clickThrough: boolean;
   paused: boolean;
   alwaysOnTop: boolean;
+  passthroughAvailable: boolean;
 }
 
 export type OverlayCommand = 'pause-toggle' | 'reset';

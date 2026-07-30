@@ -6,9 +6,21 @@ const {
   globalShortcut,
   ipcMain,
   screen,
+  dialog,
 } = require('electron');
 const path = require('node:path');
 const { Worker } = require('node:worker_threads');
+const { registerControls } = require('./global-controls.cjs');
+const {
+  allowClickThroughChange,
+  applyClickThroughToWindow,
+} = require('./clickthrough-policy.cjs');
+const {
+  acquireSingleInstanceLock,
+  activateOverlayWindow,
+  bootstrapOverlay,
+  synchronizeWorkerPause,
+} = require('./startup.cjs');
 
 const CHANNELS = Object.freeze({
   overlayState: 'overlay:state',
@@ -44,6 +56,7 @@ let shuttingDown = false;
 let quitReady = false;
 let clickThrough = true;
 let paused = false;
+let passthroughAvailable = true;
 let activeDisplayId = null;
 let lastPhysicalSnapshot = null;
 let lastRendererSnapshot = null;
@@ -183,6 +196,7 @@ function overlayState() {
     clickThrough,
     paused,
     alwaysOnTop: overlayWindow?.isAlwaysOnTop() ?? false,
+    passthroughAvailable,
   };
 }
 
@@ -370,6 +384,9 @@ function startTerminalWorker() {
   }
 
   terminalWorker = worker;
+  // A pause shortcut can fire while startup awaits the conflict dialog. New
+  // workers must inherit the canonical state instead of their default.
+  synchronizeWorkerPause(worker, paused);
   let failureHandled = false;
   const failOnce = () => {
     if (failureHandled) return;
@@ -408,21 +425,17 @@ function stopWorker(worker) {
 
 function setClickThrough(enabled) {
   const next = Boolean(enabled);
-  if (next === clickThrough && overlayWindow) {
+  // If the passthrough shortcut is unavailable, prevent enabling
+  // click-through — there would be no keyboard recovery path.
+  if (!allowClickThroughChange(next, passthroughAvailable)) {
     broadcastState();
     return;
   }
   clickThrough = next;
-  if (overlayWindow && !overlayWindow.isDestroyed()) {
-    overlayWindow.setIgnoreMouseEvents(clickThrough, { forward: true });
-    if (clickThrough) {
-      overlayWindow.blur();
-      overlayWindow.showInactive();
-    } else {
-      overlayWindow.show();
-      overlayWindow.focus();
-    }
-  }
+  // Always synchronize a live window, even if the canonical value did not
+  // change. A shortcut can fire before window creation and leave the new
+  // BrowserWindow's native ignore-mouse default out of sync.
+  applyClickThroughToWindow(overlayWindow, clickThrough);
   broadcastState();
 }
 
@@ -450,7 +463,7 @@ function sendInitialRendererState() {
   }
 }
 
-function createOverlayWindow() {
+function createOverlayWindow(initialClickThrough) {
   const bounds = screen.getPrimaryDisplay().bounds;
   activeDisplayId = String(screen.getPrimaryDisplay().id);
   overlayWindow = new BrowserWindow({
@@ -493,17 +506,13 @@ function createOverlayWindow() {
     const currentUrl = overlayWindow?.webContents.getURL();
     if (currentUrl && url !== currentUrl) event.preventDefault();
   });
+
+  // Apply initial mouse interaction policy after window is created.
+  // The window must exist before setClickThrough can set ignore-mouse.
+  setClickThrough(initialClickThrough);
 }
 
-function registerGlobalControls() {
-  globalShortcut.register('CommandOrControl+Shift+O', () => {
-    setClickThrough(!clickThrough);
-  });
-  globalShortcut.register('CommandOrControl+Alt+Shift+P', () => {
-    setPaused(!paused);
-  });
-  globalShortcut.register('CommandOrControl+Alt+Shift+R', resetClimber);
-}
+
 
 function refreshDisplayGeometry() {
   if (!lastPhysicalSnapshot) return;
@@ -636,18 +645,44 @@ async function executeProbe() {
   app.exit(exitCode);
 }
 
+// Single-instance guard — exempt from PROBE_MODE so multiple probes can
+// be launched independently while the overlay is running.
+if (!PROBE_MODE) {
+  const secondInstanceHandler = () => {
+    activateOverlayWindow(overlayWindow, clickThrough);
+  };
+  acquireSingleInstanceLock(app, secondInstanceHandler);
+}
+
 app.whenReady().then(async () => {
   if (PROBE_MODE) {
     await executeProbe();
     return;
   }
 
-  createOverlayWindow();
-  registerGlobalControls();
-  screen.on('display-metrics-changed', refreshDisplayGeometry);
-  screen.on('display-added', refreshDisplayGeometry);
-  screen.on('display-removed', refreshDisplayGeometry);
-  startTerminalWorker();
+  // Delegate shortcut registration, dialog, window creation, and worker
+  // startup to the extracted orchestration helper so that the same code
+  // path is covered by unit tests (tests/startup-orchestration.test.ts).
+  const result = await bootstrapOverlay({
+    shortcutApi: globalShortcut,
+    handlers: {
+      togglePassthrough: () => setClickThrough(!clickThrough),
+      togglePause: () => setPaused(!paused),
+      resetClimber,
+    },
+    registerControls,
+    showMessageBox: dialog.showMessageBox.bind(dialog),
+    createOverlayWindow,
+    startTerminalWorker,
+    onDisplayMetricsChanged: refreshDisplayGeometry,
+    onDisplayAdded: refreshDisplayGeometry,
+    onDisplayRemoved: refreshDisplayGeometry,
+    screenApi: screen,
+  });
+
+  // Track passthrough recovery availability so the IPC handler can
+  // reject unsafe click-through transitions.
+  passthroughAvailable = result.passthroughAvailable;
 });
 
 ipcMain.handle(CHANNELS.getOverlayState, () => overlayState());

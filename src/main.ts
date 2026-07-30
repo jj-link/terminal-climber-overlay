@@ -72,6 +72,7 @@ function renderBackendStatus(): void {
 function renderOverlayState(state: OverlayState): void {
   clickThrough = state.clickThrough;
   paused = state.paused;
+  const passthroughAvail = state.passthroughAvailable ?? true;
   appElement.dataset.clickThrough = String(clickThrough);
   controlsElement.inert = clickThrough;
 
@@ -84,6 +85,10 @@ function renderOverlayState(state: OverlayState): void {
     ? 'Resume (Ctrl+Alt+Shift+P)'
     : 'Pause (Ctrl+Alt+Shift+P)';
 
+  // Disable the passthrough toggle whenever its recovery shortcut is
+  // unavailable — enabling click-through would leave no way back,
+  // and clicking when already active is a dead control.
+  passthroughButton.disabled = !passthroughAvail;
   passthroughButton.setAttribute('aria-pressed', String(clickThrough));
   passthroughButton.setAttribute(
     'aria-label',
@@ -94,6 +99,13 @@ function renderOverlayState(state: OverlayState): void {
   );
   if (passthroughLabel) {
     passthroughLabel.textContent = clickThrough ? 'Mouse pass' : 'Mouse active';
+  }
+
+  // Set the tooltip title.
+  if (!passthroughAvail) {
+    passthroughButton.title = 'Toggle unavailable — shortcut conflict';
+  } else {
+    passthroughButton.title = 'Toggle mouse passthrough (Ctrl+Shift+O)';
   }
 
   simulation.setPaused(paused);
@@ -129,7 +141,7 @@ pauseButton.addEventListener('click', () => {
   if (window.terminalClimberApi) {
     window.terminalClimberApi.setPaused(!paused);
   } else {
-    renderOverlayState({ clickThrough, paused: !paused, alwaysOnTop: false });
+    renderOverlayState({ clickThrough, paused: !paused, alwaysOnTop: false, passthroughAvailable: true });
   }
 });
 
@@ -142,7 +154,7 @@ passthroughButton.addEventListener('click', () => {
   if (window.terminalClimberApi) {
     window.terminalClimberApi.setClickThrough(!clickThrough);
   } else {
-    renderOverlayState({ clickThrough: !clickThrough, paused, alwaysOnTop: false });
+    renderOverlayState({ clickThrough: !clickThrough, paused, alwaysOnTop: false, passthroughAvailable: true });
   }
 });
 
