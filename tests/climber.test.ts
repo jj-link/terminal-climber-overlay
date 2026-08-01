@@ -616,6 +616,156 @@ describe('slipping-hand sprite selection', () => {
   });
 });
 
+describe('ClimberSimulation reset preserves paused state', () => {
+  it('remains paused after reset and resumes to grounded', () => {
+    const { simulation, frames } = hangingSimulation();
+
+    // Pause the active climber
+    simulation.setPaused(true);
+    expect(simulation.state).toBe('paused');
+
+    // Reset while paused — should stay paused, with grounded as resume state
+    simulation.reset();
+    expect(simulation.state).toBe('paused');
+
+    // Resume — should return to grounded (the reset baseline)
+    simulation.setPaused(false);
+    expect(simulation.state).toBe('grounded');
+
+    // Confirm the climber proceeds normally from grounded
+    frames.advance(16);
+    expect(simulation.state).toBe('launching');
+
+    simulation.destroy();
+  });
+
+  it('stays grounded after reset when not paused', () => {
+    const { simulation } = hangingSimulation();
+
+    // Not paused — reset should go to grounded normally
+    simulation.reset();
+    expect(simulation.state).toBe('grounded');
+    expect(simulation.hasFlag).toBe(false);
+
+    simulation.destroy();
+  });
+
+  it('preserves pause through multiple consecutive resets', () => {
+    const { simulation } = hangingSimulation();
+
+    simulation.setPaused(true);
+    expect(simulation.state).toBe('paused');
+
+    simulation.reset();
+    expect(simulation.state).toBe('paused');
+    simulation.reset();
+    expect(simulation.state).toBe('paused');
+    simulation.reset();
+    expect(simulation.state).toBe('paused');
+
+    simulation.setPaused(false);
+    expect(simulation.state).toBe('grounded');
+
+    simulation.destroy();
+  });
+
+  it('clears pointer state after reset while paused', () => {
+    const { simulation, frames } = hangingSimulation();
+
+    // Seed pointer tracking so #lastPointer is populated
+    const pointerY = simulation.position.y + SPRITE_HEIGHT / 2;
+    simulation.handlePointerMove({ x: 100, y: pointerY }, 0);
+    simulation.handlePointerMove({ x: 200, y: pointerY }, 1000);
+    expect(simulation.state).toBe('hanging');
+
+    // Pause the climber
+    simulation.setPaused(true);
+    expect(simulation.state).toBe('paused');
+
+    // Reset while paused clears pointer tracking
+    simulation.reset();
+    expect(simulation.state).toBe('paused');
+
+    // Resume — pointer moves should start fresh (no stale segment intersect)
+    simulation.setPaused(false);
+    expect(simulation.state).toBe('grounded');
+
+    // Advance to hanging so we have an attached state with a valid hold
+    advanceUntil(simulation, frames, 'hanging');
+
+    // Send a pointer movement at an increasing timestamp on the opposite
+    // side of the climber from the pre-reset pointer (x=200), so a
+    // retained stale segment crosses the current hitbox at high speed.
+    // With a correctly cleared reset there is no previous pointer and
+    // the climber stays hanging safely.
+    const freshPointerY = simulation.position.y + SPRITE_HEIGHT / 2;
+    simulation.handlePointerMove(
+      { x: simulation.position.x - 1000, y: freshPointerY },
+      2000,
+    );
+    expect(simulation.state).toBe('hanging');
+
+    simulation.destroy();
+  });
+
+  it('preserves pause when resetting from summiting state', () => {
+    const { simulation, frames } = hangingSimulation();
+
+    // Drive to summiting so we have a different state to pause from
+    advanceUntil(simulation, frames, 'summiting', 200);
+
+    // Pause while in summiting state
+    simulation.setPaused(true);
+    expect(simulation.state).toBe('paused');
+
+    // Reset while paused from summiting
+    simulation.reset();
+    expect(simulation.state).toBe('paused');
+
+    // Resume — grounded, not summiting
+    simulation.setPaused(false);
+    expect(simulation.state).toBe('grounded');
+
+    simulation.destroy();
+  });
+
+  it('preserves pause when resetting from slipping state', () => {
+    const { simulation, frames } = hangingSimulation();
+
+    // Induce slipping via a fast pointer movement (too-large delta)
+    const pointerY = simulation.position.y + SPRITE_HEIGHT / 2;
+    simulation.handlePointerMove({ x: 100, y: pointerY }, 0);
+    simulation.handlePointerMove({ x: 200, y: pointerY }, 50);
+    expect(simulation.state).toBe('slipping');
+
+    // Pause while slipping
+    simulation.setPaused(true);
+    expect(simulation.state).toBe('paused');
+
+    // Reset while paused from slipping
+    simulation.reset();
+    expect(simulation.state).toBe('paused');
+
+    // Resume — grounded, not slipping
+    simulation.setPaused(false);
+    expect(simulation.state).toBe('grounded');
+
+    simulation.destroy();
+  });
+
+  it('clears flag when resetting while paused', () => {
+    const { simulation } = campedSimulation();
+    expect(simulation.hasFlag).toBe(true);
+
+    simulation.setPaused(true);
+    simulation.reset();
+    expect(simulation.state).toBe('paused');
+    expect(simulation.hasFlag).toBe(false);
+
+    simulation.destroy();
+  });
+});
+
 describe('climber motion model factory', () => {
   it('createClimberMotionModel produces separate hand anchors and route array', () => {
     const model = createClimberMotionModel(300, 300);

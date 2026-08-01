@@ -54,6 +54,7 @@ The expanded status capsule also provides pause, reset, passthrough, and close b
 - When an attached row exits above the terminal viewport, the climber re-enters from the top of the physical display, falls to the display floor, lands, and restarts.
 - Only a stable, topmost terminal row counts as a summit. There the climber mantles onto the text, plants a flag, and camps; a newly confirmed handhold makes it pack up and resume climbing.
 - A fast cursor sweep makes one hand slip when the other can brace; the climber recovers on the hold. A one-handed climber falls on a fast strike. The campsite is cleared when its row disappears, the terminal target changes, or the climber is reset.
+- Resetting the climber while paused preserves the paused state; use the pause toggle to resume from the grounded baseline.
 - Focusing a nonterminal window for more than 500 ms releases the climber and leaves it pacing at the display bottom until tracking resumes.
 
 ## Terminal access and privacy
