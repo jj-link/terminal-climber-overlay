@@ -625,7 +625,11 @@ export class ClimberSimulation {
 
   reset(): void {
     if (this.#destroyed) return;
+    const wasPaused = this.#motion.state === 'paused';
     resetClimberMotionModel(this.#motion);
+    if (wasPaused) {
+      this.#motion.state = 'paused';
+    }
     this.#lastPointer = null;
     this.#notify(true);
   }
