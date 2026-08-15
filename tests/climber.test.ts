@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { RendererTerminalSnapshot } from '../src/contracts';
 import {
+  BUMP_IMPULSE_FACTOR,
   ClimberSimulation,
   HAND_OFFSET_Y,
   HAND_SPREAD,
   HOLD_INSET,
   LANDING_RECOVERY,
+  MAX_BUMP_IMPULSE,
   SPRITE_HEIGHT,
   SPRITE_WIDTH,
   isUsableClimberHold,
@@ -173,6 +175,57 @@ describe('ClimberSimulation attachment rules', () => {
     for (let frame = 0; frame < 6; frame += 1) fast.frames.advance(50);
     expect(fast.simulation.state).toBe('hanging');
     fast.simulation.destroy();
+  });
+
+  it('falls with an impulse proportional to the cursor velocity', () => {
+    const { simulation, frames } = headlessSimulation();
+    advanceUntil(simulation, frames, 'launching');
+    const impactY = simulation.position.y + SPRITE_HEIGHT / 2;
+    const startX = simulation.position.x - 60;
+
+    simulation.handlePointerMove({ x: startX, y: impactY }, 0);
+    simulation.handlePointerMove({ x: startX + 100, y: impactY }, 100);
+
+    expect(simulation.state).toBe('falling');
+    expect(simulation.velocity.x).toBeCloseTo(1000 * BUMP_IMPULSE_FACTOR, 5);
+    expect(simulation.velocity.y).toBeCloseTo(0, 5);
+    simulation.destroy();
+  });
+
+  it('caps the cursor bump impulse at MAX_BUMP_IMPULSE', () => {
+    const { simulation, frames } = headlessSimulation();
+    advanceUntil(simulation, frames, 'launching');
+    const impactY = simulation.position.y + SPRITE_HEIGHT / 2;
+    const startX = simulation.position.x - 300;
+
+    simulation.handlePointerMove({ x: startX, y: impactY }, 0);
+    simulation.handlePointerMove({ x: startX + 500, y: impactY }, 100);
+
+    expect(simulation.state).toBe('falling');
+    expect(simulation.velocity.x).toBe(MAX_BUMP_IMPULSE);
+    simulation.destroy();
+  });
+
+  it('launches the climber in the direction the cursor was travelling', () => {
+    const down = headlessSimulation();
+    advanceUntil(down.simulation, down.frames, 'launching');
+    const downX = down.simulation.position.x + SPRITE_WIDTH / 2;
+    const downY = down.simulation.position.y + SPRITE_HEIGHT / 2;
+    down.simulation.handlePointerMove({ x: downX, y: downY - 150 }, 0);
+    down.simulation.handlePointerMove({ x: downX, y: downY + 150 }, 100);
+    expect(down.simulation.state).toBe('falling');
+    expect(down.simulation.velocity.y).toBeCloseTo(3000 * BUMP_IMPULSE_FACTOR, 5);
+    down.simulation.destroy();
+
+    const up = headlessSimulation();
+    advanceUntil(up.simulation, up.frames, 'launching');
+    const upX = up.simulation.position.x + SPRITE_WIDTH / 2;
+    const upY = up.simulation.position.y + SPRITE_HEIGHT / 2;
+    up.simulation.handlePointerMove({ x: upX, y: upY + 150 }, 0);
+    up.simulation.handlePointerMove({ x: upX, y: upY - 150 }, 100);
+    expect(up.simulation.state).toBe('falling');
+    expect(up.simulation.velocity.y).toBeCloseTo(-3000 * BUMP_IMPULSE_FACTOR, 5);
+    up.simulation.destroy();
   });
 
   it('re-enters at exactly the display top when its attached row exits upward', () => {

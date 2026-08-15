@@ -79,7 +79,11 @@ function followsAttachedRow(state: ClimberState): boolean {
   );
 }
 
-export function beginFall(model: ClimberMotionModel, vx = model.vx): void {
+export function beginFall(
+  model: ClimberMotionModel,
+  vx = model.vx,
+  vy?: number,
+): void {
   model.attachedKey = null;
   model.targetKey = null;
   model.leftHand.key = null;
@@ -93,7 +97,7 @@ export function beginFall(model: ClimberMotionModel, vx = model.vx): void {
   model.routeSearchAboveY = Number.POSITIVE_INFINITY;
   model.routeRetryElapsed = 0;
   model.vx = vx;
-  model.vy = Math.max(model.vy, 0);
+  model.vy = vy ?? Math.max(model.vy, 0);
   setMotionState(model, 'falling');
 }
 

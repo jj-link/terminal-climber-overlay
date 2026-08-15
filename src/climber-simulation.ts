@@ -24,6 +24,8 @@ import {
   HOLD_INSET,
   HITBOX_PADDING,
   POINTER_BUMP_SPEED,
+  BUMP_IMPULSE_FACTOR,
+  MAX_BUMP_IMPULSE,
   STATUS_GRACE_MS,
   EMPTY_HOLDS,
 } from './climber-model';
@@ -203,6 +205,10 @@ export class ClimberSimulation {
 
   get position(): Readonly<Point> {
     return { x: this.#motion.x, y: this.#motion.y };
+  }
+
+  get velocity(): Readonly<Point> {
+    return { x: this.#motion.vx, y: this.#motion.vy };
   }
 
   get hasFlag(): boolean {
@@ -585,6 +591,7 @@ export class ClimberSimulation {
 
     if (speed >= POINTER_BUMP_SPEED && isAttachedState(this.#motion.state)) {
       const cursorVx = dx / elapsedSeconds;
+      const cursorVy = dy / elapsedSeconds;
       const canSlip =
         this.#motion.leftHand.key !== null &&
         this.#motion.rightHand.key !== null &&
@@ -594,12 +601,16 @@ export class ClimberSimulation {
           x: (previous.point.x + point.x) / 2,
           y: (previous.point.y + point.y) / 2,
         });
-        if (beginOneHandSlip(this.#motion, side, cursorVx * 0.35)) {
+        if (beginOneHandSlip(this.#motion, side, cursorVx * BUMP_IMPULSE_FACTOR)) {
           this.#notify(true);
           return;
         }
       }
-      beginFall(this.#motion, clamp(cursorVx * 0.35, -500, 500));
+      beginFall(
+        this.#motion,
+        clamp(cursorVx * BUMP_IMPULSE_FACTOR, -MAX_BUMP_IMPULSE, MAX_BUMP_IMPULSE),
+        clamp(cursorVy * BUMP_IMPULSE_FACTOR, -MAX_BUMP_IMPULSE, MAX_BUMP_IMPULSE),
+      );
       this.#notify(true);
     } else if (speed < POINTER_BUMP_SPEED) {
       this.#bumpUntil = this.#clock() + 160;
