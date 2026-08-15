@@ -17,14 +17,12 @@ npm install
 npm run overlay
 ```
 
-The overlay starts in mouse-passthrough mode, so terminal input remains uninterrupted. Press `Ctrl+Shift+O` to make its controls interactive.
+The overlay starts in mouse-passthrough mode, so terminal input remains uninterrupted. There are no on-screen controls. Press `Esc` to quit the app.
 
-If another application claims one of the global shortcuts, the overlay will
-report the conflict at startup and leave mouse interaction enabled so the
-on-screen controls remain reachable. Only one overlay instance runs at a time;
-subsequent launch attempts restore or reveal the existing window. When mouse
-passthrough is enabled, the overlay remains inactive so terminal focus is not
-stolen.
+If another application claims the `Escape` global shortcut, the overlay will
+report the conflict at startup and keep running. Only one overlay instance
+runs at a time; subsequent launch attempts reveal the existing window. The
+overlay remains inactive so terminal focus is not stolen.
 
 For development with Vite and Electron:
 
@@ -36,11 +34,7 @@ npm run overlay:dev
 
 | Action | Shortcut |
 | --- | --- |
-| Toggle mouse passthrough | `Ctrl+Shift+O` |
-| Pause or resume | `Ctrl+Alt+Shift+P` |
-| Reset the climber | `Ctrl+Alt+Shift+R` |
-
-The expanded status capsule also provides pause, reset, passthrough, and close buttons.
+| Quit Terminal Climber | `Esc` |
 
 ## Behavior
 
@@ -54,7 +48,6 @@ The expanded status capsule also provides pause, reset, passthrough, and close b
 - When an attached row exits above the terminal viewport, the climber re-enters from the top of the physical display, falls to the display floor, lands, and restarts.
 - Only a stable, topmost terminal row counts as a summit. There the climber mantles onto the text, plants a flag, and camps; a newly confirmed handhold makes it pack up and resume climbing.
 - A fast cursor sweep makes one hand slip when the other can brace; the climber recovers on the hold. A one-handed climber falls on a fast strike. The campsite is cleared when its row disappears, the terminal target changes, or the climber is reset.
-- Resetting the climber while paused preserves the paused state; use the pause toggle to resume from the grounded baseline.
 - Focusing a nonterminal window for more than 500 ms releases the climber and leaves it pacing at the display bottom until tracking resumes.
 
 ## Terminal access and privacy
@@ -87,6 +80,6 @@ A successful probe prints only tracking status, an anonymous target identifier, 
 - `electron/preload.cjs` — narrow context-isolated renderer API.
 - `src/row-tracker.ts` — anonymous row/segment reconciliation and scroll/redraw detection.
 - `src/climber.ts` — deterministic climber physics, state transitions, collision handling, and canvas rendering.
-- `src/main.ts` — renderer wiring, observable status, and controls.
+- `src/main.ts` — renderer wiring: feeds terminal snapshots into the climber.
 - `src/assets/climber-sprites.svg` — 32-frame pixel-art atlas, including summit and campsite poses.
 - `tests/` — row-tracking and climber behavior tests.

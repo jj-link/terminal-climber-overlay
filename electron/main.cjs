@@ -12,7 +12,6 @@ const path = require('node:path');
 const { Worker } = require('node:worker_threads');
 const { registerControls } = require('./global-controls.cjs');
 const {
-  allowClickThroughChange,
   applyClickThroughToWindow,
 } = require('./clickthrough-policy.cjs');
 const {
@@ -23,13 +22,7 @@ const {
 } = require('./startup.cjs');
 
 const CHANNELS = Object.freeze({
-  overlayState: 'overlay:state',
-  getOverlayState: 'overlay:get-state',
-  setClickThrough: 'overlay:set-click-through',
-  setPaused: 'overlay:set-paused',
-  reset: 'overlay:reset',
   command: 'overlay:command',
-  quit: 'overlay:quit',
   terminalSnapshot: 'terminal:snapshot',
   terminalStatus: 'terminal:status',
 });
@@ -54,9 +47,7 @@ let workerCrashCount = 0;
 let workerGeneration = 0;
 let shuttingDown = false;
 let quitReady = false;
-let clickThrough = true;
 let paused = false;
-let passthroughAvailable = true;
 let activeDisplayId = null;
 let lastPhysicalSnapshot = null;
 let lastRendererSnapshot = null;
@@ -191,14 +182,6 @@ function sanitizePhysicalSnapshot(value) {
   };
 }
 
-function overlayState() {
-  return {
-    clickThrough,
-    paused,
-    alwaysOnTop: overlayWindow?.isAlwaysOnTop() ?? false,
-    passthroughAvailable,
-  };
-}
 
 function sendRenderer(channel, payload) {
   if (
@@ -211,9 +194,6 @@ function sendRenderer(channel, payload) {
   overlayWindow.webContents.send(channel, payload);
 }
 
-function broadcastState() {
-  sendRenderer(CHANNELS.overlayState, overlayState());
-}
 
 function broadcastTerminalStatus(message) {
   lastTerminalStatus = message;
@@ -384,9 +364,9 @@ function startTerminalWorker() {
   }
 
   terminalWorker = worker;
-  // A pause shortcut can fire while startup awaits the conflict dialog. New
-  // workers must inherit the canonical state instead of their default.
-  synchronizeWorkerPause(worker, paused);
+  // No pause state exists anymore; keep new workers synchronized to the
+  // canonical (never-paused) state.
+  synchronizeWorkerPause(worker, false);
   let failureHandled = false;
   const failOnce = () => {
     if (failureHandled) return;
@@ -423,47 +403,14 @@ function stopWorker(worker) {
   });
 }
 
-function setClickThrough(enabled) {
-  const next = Boolean(enabled);
-  // If the passthrough shortcut is unavailable, prevent enabling
-  // click-through — there would be no keyboard recovery path.
-  if (!allowClickThroughChange(next, passthroughAvailable)) {
-    broadcastState();
-    return;
-  }
-  clickThrough = next;
-  // Always synchronize a live window, even if the canonical value did not
-  // change. A shortcut can fire before window creation and leave the new
-  // BrowserWindow's native ignore-mouse default out of sync.
-  applyClickThroughToWindow(overlayWindow, clickThrough);
-  broadcastState();
-}
-
-function setPaused(enabled) {
-  const next = Boolean(enabled);
-  if (next === paused) {
-    broadcastState();
-    return;
-  }
-  paused = next;
-  terminalWorker?.postMessage({ type: 'pause', paused });
-  sendRenderer(CHANNELS.command, 'pause-toggle');
-  broadcastState();
-}
-
-function resetClimber() {
-  sendRenderer(CHANNELS.command, 'reset');
-}
-
 function sendInitialRendererState() {
-  broadcastState();
   sendRenderer(CHANNELS.terminalStatus, lastTerminalStatus);
   if (lastRendererSnapshot) {
     sendRenderer(CHANNELS.terminalSnapshot, lastRendererSnapshot);
   }
 }
 
-function createOverlayWindow(initialClickThrough) {
+function createOverlayWindow() {
   const bounds = screen.getPrimaryDisplay().bounds;
   activeDisplayId = String(screen.getPrimaryDisplay().id);
   overlayWindow = new BrowserWindow({
@@ -507,9 +454,9 @@ function createOverlayWindow(initialClickThrough) {
     if (currentUrl && url !== currentUrl) event.preventDefault();
   });
 
-  // Apply initial mouse interaction policy after window is created.
-  // The window must exist before setClickThrough can set ignore-mouse.
-  setClickThrough(initialClickThrough);
+  // The overlay is always click-through (there is no toggle any more), so
+  // synchronize the native policy once the window exists.
+  applyClickThroughToWindow(overlayWindow, true);
 }
 
 
@@ -649,7 +596,7 @@ async function executeProbe() {
 // be launched independently while the overlay is running.
 if (!PROBE_MODE) {
   const secondInstanceHandler = () => {
-    activateOverlayWindow(overlayWindow, clickThrough);
+    activateOverlayWindow(overlayWindow, true);
   };
   acquireSingleInstanceLock(app, secondInstanceHandler);
 }
@@ -663,12 +610,10 @@ app.whenReady().then(async () => {
   // Delegate shortcut registration, dialog, window creation, and worker
   // startup to the extracted orchestration helper so that the same code
   // path is covered by unit tests (tests/startup-orchestration.test.ts).
-  const result = await bootstrapOverlay({
+  await bootstrapOverlay({
     shortcutApi: globalShortcut,
     handlers: {
-      togglePassthrough: () => setClickThrough(!clickThrough),
-      togglePause: () => setPaused(!paused),
-      resetClimber,
+      quit: () => app.quit(),
     },
     registerControls,
     showMessageBox: dialog.showMessageBox.bind(dialog),
@@ -679,21 +624,8 @@ app.whenReady().then(async () => {
     onDisplayRemoved: refreshDisplayGeometry,
     screenApi: screen,
   });
-
-  // Track passthrough recovery availability so the IPC handler can
-  // reject unsafe click-through transitions.
-  passthroughAvailable = result.passthroughAvailable;
 });
 
-ipcMain.handle(CHANNELS.getOverlayState, () => overlayState());
-ipcMain.on(CHANNELS.setClickThrough, (_event, enabled) => {
-  setClickThrough(enabled);
-});
-ipcMain.on(CHANNELS.setPaused, (_event, enabled) => {
-  setPaused(enabled);
-});
-ipcMain.on(CHANNELS.reset, resetClimber);
-ipcMain.on(CHANNELS.quit, () => app.quit());
 
 app.on('before-quit', (event) => {
   if (PROBE_MODE || quitReady || (!terminalWorker && !workerRestartTimer)) return;

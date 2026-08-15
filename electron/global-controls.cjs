@@ -1,9 +1,7 @@
 'use strict';
 
 const ACCELERATORS = Object.freeze({
-  togglePassthrough: 'CommandOrControl+Shift+O',
-  togglePause: 'CommandOrControl+Alt+Shift+P',
-  resetClimber: 'CommandOrControl+Alt+Shift+R',
+  quit: 'Escape',
 });
 
 /**
@@ -52,9 +50,6 @@ function registerControls(shortcutApi, handlers) {
   return {
     results,
     allRegistered: results.every((r) => r.success),
-    passthroughAvailable: results.find(
-      (r) => r.name === 'togglePassthrough'
-    )?.success ?? false,
     failures: results.filter((r) => !r.success),
   };
 }

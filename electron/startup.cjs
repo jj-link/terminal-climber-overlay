@@ -68,11 +68,10 @@ function buildConflictDialogOptions(failures) {
     title: 'Terminal Climber — Shortcut Conflicts',
     message:
       'One or more global shortcuts could not be registered. '
-      + 'Another application may be using the same keys. '
-      + 'Mouse controls remain active.',
+      + 'Another application may be using the same keys.',
     detail:
       'Conflicting shortcuts:\n  - ' + conflictList + '\n\n'
-      + 'You can still use the on-screen controls to manage the overlay.',
+      + 'The overlay will keep running; close it from Task Manager if you cannot press the shortcut.',
     buttons: ['OK'],
   };
 }

@@ -147,16 +147,14 @@ describe('startup — bootstrapOverlay', () => {
     };
   }
 
-  it('creates the window with click-through enabled when all shortcuts register', async () => {
+  it('creates the window with click-through enabled when the quit shortcut registers', async () => {
     const createWindow = vi.fn();
     const startWorker = vi.fn();
 
     await bootstrapOverlay({
-      shortcutApi: createShortcutApi(true, true, true),
+      shortcutApi: createShortcutApi(true),
       handlers: {
-        togglePassthrough: vi.fn(),
-        togglePause: vi.fn(),
-        resetClimber: vi.fn(),
+        quit: vi.fn(),
       },
       registerControls,
       showMessageBox: vi.fn(),
@@ -168,21 +166,19 @@ describe('startup — bootstrapOverlay', () => {
       screenApi: null,
     });
 
-    // All shortcuts registered → click-through ON (ignore mouse, use keyboard).
+    // Shortcut registered → click-through ON (ignore mouse, use keyboard).
     expect(createWindow).toHaveBeenCalledWith(true);
     expect(startWorker).toHaveBeenCalledTimes(1);
   });
 
-  it('creates the window with click-through disabled when passthrough fails', async () => {
+  it('creates the window with click-through disabled when the quit shortcut fails', async () => {
     const createWindow = vi.fn();
     const showBox = vi.fn();
 
     await bootstrapOverlay({
-      shortcutApi: createShortcutApi(false, true, true),
+      shortcutApi: createShortcutApi(false),
       handlers: {
-        togglePassthrough: vi.fn(),
-        togglePause: vi.fn(),
-        resetClimber: vi.fn(),
+        quit: vi.fn(),
       },
       registerControls,
       showMessageBox: showBox,
@@ -194,33 +190,7 @@ describe('startup — bootstrapOverlay', () => {
       screenApi: null,
     });
 
-    // Shortcuts failed → click-through OFF (direct mouse control).
-    expect(createWindow).toHaveBeenCalledWith(false);
-    expect(showBox).toHaveBeenCalledTimes(1);
-  });
-
-  it('creates the window with click-through disabled when non-passthrough shortcuts fail', async () => {
-    const createWindow = vi.fn();
-    const showBox = vi.fn();
-
-    await bootstrapOverlay({
-      shortcutApi: createShortcutApi(true, false, true),
-      handlers: {
-        togglePassthrough: vi.fn(),
-        togglePause: vi.fn(),
-        resetClimber: vi.fn(),
-      },
-      registerControls,
-      showMessageBox: showBox,
-      createOverlayWindow: createWindow,
-      startTerminalWorker: vi.fn(),
-      onDisplayMetricsChanged: vi.fn(),
-      onDisplayAdded: vi.fn(),
-      onDisplayRemoved: vi.fn(),
-      screenApi: null,
-    });
-
-    // Any shortcut failed → click-through OFF (direct mouse control).
+    // Shortcut failed → click-through OFF (direct mouse control).
     expect(createWindow).toHaveBeenCalledWith(false);
     expect(showBox).toHaveBeenCalledTimes(1);
   });
@@ -231,11 +201,9 @@ describe('startup — bootstrapOverlay', () => {
     const showBox = vi.fn().mockRejectedValue(new Error('dialog error'));
 
     const result = await bootstrapOverlay({
-      shortcutApi: createShortcutApi(false, true, true),
+      shortcutApi: createShortcutApi(false),
       handlers: {
-        togglePassthrough: vi.fn(),
-        togglePause: vi.fn(),
-        resetClimber: vi.fn(),
+        quit: vi.fn(),
       },
       registerControls,
       showMessageBox: showBox,
@@ -253,41 +221,38 @@ describe('startup — bootstrapOverlay', () => {
     expect(result.dialogShown).toBe(false);
   });
 
-  it('synchronizes a worker when pause is toggled while the dialog is pending', async () => {
+  it('invokes the quit handler when the shortcut fires while the dialog is pending', async () => {
     let resolveDialog: (value: unknown) => void;
     const dialogPromise = new Promise((resolve) => { resolveDialog = resolve; });
-    const registered = new Map<string, () => void>();
+    const registered: Record<string, (() => void) | undefined> = {};
     const shortcutApi = {
       register: vi.fn((accelerator: string, handler: () => void) => {
-        registered.set(accelerator, handler);
-        return accelerator !== 'CommandOrControl+Shift+O';
+        registered[accelerator] = handler;
+        return false;
       }),
     };
-    const worker = { postMessage: vi.fn() };
-    let paused = false;
+    const quitFn = vi.fn();
 
     const startup = bootstrapOverlay({
       shortcutApi,
       handlers: {
-        togglePassthrough: vi.fn(),
-        togglePause: () => { paused = !paused; },
-        resetClimber: vi.fn(),
+        quit: quitFn,
       },
       registerControls,
       showMessageBox: vi.fn().mockReturnValue(dialogPromise),
       createOverlayWindow: vi.fn(),
-      startTerminalWorker: () => synchronizeWorkerPause(worker, paused),
+      startTerminalWorker: vi.fn(),
       onDisplayMetricsChanged: vi.fn(),
       onDisplayAdded: vi.fn(),
       onDisplayRemoved: vi.fn(),
       screenApi: null,
     });
 
-    registered.get('CommandOrControl+Alt+Shift+P')?.();
+    registered['Escape']?.();
     resolveDialog!({ response: 0 });
     await startup;
 
-    expect(worker.postMessage).toHaveBeenCalledWith({ type: 'pause', paused: true });
+    expect(quitFn).toHaveBeenCalledTimes(1);
   });
 
   it('skips display listeners when screenApi is null', async () => {
@@ -296,11 +261,9 @@ describe('startup — bootstrapOverlay', () => {
     const onRemoved = vi.fn();
 
     await bootstrapOverlay({
-      shortcutApi: createShortcutApi(true, true, true),
+      shortcutApi: createShortcutApi(true),
       handlers: {
-        togglePassthrough: vi.fn(),
-        togglePause: vi.fn(),
-        resetClimber: vi.fn(),
+        quit: vi.fn(),
       },
       registerControls,
       createOverlayWindow: vi.fn(),
@@ -317,13 +280,11 @@ describe('startup — bootstrapOverlay', () => {
     expect(onRemoved).not.toHaveBeenCalled();
   });
 
-  it('reports initialClickThrough false when passthrough shortcut fails', async () => {
+  it('reports initialClickThrough false when the quit shortcut fails', async () => {
     const result = await bootstrapOverlay({
-      shortcutApi: createShortcutApi(false, true, true),
+      shortcutApi: createShortcutApi(false),
       handlers: {
-        togglePassthrough: vi.fn(),
-        togglePause: vi.fn(),
-        resetClimber: vi.fn(),
+        quit: vi.fn(),
       },
       registerControls,
       showMessageBox: vi.fn(),
@@ -335,41 +296,15 @@ describe('startup — bootstrapOverlay', () => {
       screenApi: null,
     });
 
-    expect(result.passthroughAvailable).toBe(false);
-    expect(result.initialClickThrough).toBe(false);
-    expect(result.dialogShown).toBe(true);
-  });
-
-  it('reports passthroughAvailable true when only non-passthrough fails', async () => {
-    const result = await bootstrapOverlay({
-      shortcutApi: createShortcutApi(true, false, false),
-      handlers: {
-        togglePassthrough: vi.fn(),
-        togglePause: vi.fn(),
-        resetClimber: vi.fn(),
-      },
-      registerControls,
-      showMessageBox: vi.fn(),
-      createOverlayWindow: vi.fn(),
-      startTerminalWorker: vi.fn(),
-      onDisplayMetricsChanged: vi.fn(),
-      onDisplayAdded: vi.fn(),
-      onDisplayRemoved: vi.fn(),
-      screenApi: null,
-    });
-
-    expect(result.passthroughAvailable).toBe(true);
     expect(result.initialClickThrough).toBe(false);
     expect(result.dialogShown).toBe(true);
   });
 
   it('skips the dialog when showMessageBox is not provided', async () => {
     const result = await bootstrapOverlay({
-      shortcutApi: createShortcutApi(false, false, false),
+      shortcutApi: createShortcutApi(false),
       handlers: {
-        togglePassthrough: vi.fn(),
-        togglePause: vi.fn(),
-        resetClimber: vi.fn(),
+        quit: vi.fn(),
       },
       registerControls,
       showMessageBox: undefined,
@@ -393,11 +328,9 @@ describe('startup — bootstrapOverlay', () => {
     const createWindow = vi.fn();
 
     bootstrapOverlay({
-      shortcutApi: createShortcutApi(false, true, true),
+      shortcutApi: createShortcutApi(false),
       handlers: {
-        togglePassthrough: vi.fn(),
-        togglePause: vi.fn(),
-        resetClimber: vi.fn(),
+        quit: vi.fn(),
       },
       registerControls,
       showMessageBox: showBox,
@@ -429,11 +362,9 @@ describe('startup — bootstrapOverlay', () => {
     const onRemoved = vi.fn();
 
     await bootstrapOverlay({
-      shortcutApi: createShortcutApi(true, true, true),
+      shortcutApi: createShortcutApi(true),
       handlers: {
-        togglePassthrough: vi.fn(),
-        togglePause: vi.fn(),
-        resetClimber: vi.fn(),
+        quit: vi.fn(),
       },
       registerControls,
       createOverlayWindow: vi.fn(),
@@ -514,11 +445,9 @@ describe('startup — error resilience', () => {
   it('bootstrapOverlay propagates errors from createOverlayWindow', async () => {
     await expect(
       bootstrapOverlay({
-        shortcutApi: createShortcutApi(true, true, true),
+        shortcutApi: createShortcutApi(true),
         handlers: {
-          togglePassthrough: vi.fn(),
-          togglePause: vi.fn(),
-          resetClimber: vi.fn(),
+          quit: vi.fn(),
         },
         registerControls,
         createOverlayWindow: vi.fn(() => {
@@ -536,11 +465,9 @@ describe('startup — error resilience', () => {
   it('bootstrapOverlay propagates errors from startTerminalWorker', async () => {
     await expect(
       bootstrapOverlay({
-        shortcutApi: createShortcutApi(true, true, true),
+        shortcutApi: createShortcutApi(true),
         handlers: {
-          togglePassthrough: vi.fn(),
-          togglePause: vi.fn(),
-          resetClimber: vi.fn(),
+          quit: vi.fn(),
         },
         registerControls,
         createOverlayWindow: vi.fn(),
@@ -567,11 +494,9 @@ describe('startup — error resilience', () => {
 
     await expect(
       bootstrapOverlay({
-        shortcutApi: createShortcutApi(true, true, true),
+        shortcutApi: createShortcutApi(true),
         handlers: {
-          togglePassthrough: vi.fn(),
-          togglePause: vi.fn(),
-          resetClimber: vi.fn(),
+          quit: vi.fn(),
         },
         registerControls,
         createOverlayWindow: vi.fn(),
@@ -614,14 +539,12 @@ describe('startup — error resilience', () => {
 
   it('bootstrapOverlay skips dialog when showMessageBox is not a function', async () => {
     const result = await bootstrapOverlay({
-      shortcutApi: createShortcutApi(false, false, false),
+      shortcutApi: createShortcutApi(false),
       handlers: {
-        togglePassthrough: vi.fn(),
-        togglePause: vi.fn(),
-        resetClimber: vi.fn(),
+        quit: vi.fn(),
       },
       registerControls,
-      showMessageBox: 42 as any, // not a function
+      showMessageBox: 42 as unknown as () => Promise<void>, // not a function
       createOverlayWindow: vi.fn(),
       startTerminalWorker: vi.fn(),
       onDisplayMetricsChanged: vi.fn(),
@@ -631,7 +554,6 @@ describe('startup — error resilience', () => {
     });
 
     expect(result.dialogShown).toBe(false);
-    expect(result.passthroughAvailable).toBe(false);
     expect(result.initialClickThrough).toBe(false);
   });
 
