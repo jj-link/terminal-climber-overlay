@@ -5,6 +5,8 @@ import {
   TARGET_CONFIRM_SNAPSHOTS,
   HAND_CENTER_OFFSET_X,
   GRAPPLE_MAX_GAP_FACTOR,
+  MAX_CLIMB_GAP_FACTOR,
+  MAX_CLIMB_REACH,
 } from './climber-model';
 import {
   isUsableHandHold,
@@ -72,7 +74,7 @@ function reachableSteps(
   searchAboveY: number,
   excludedKeys: ReadonlySet<string>,
 ): ReachableStep[] {
-  const maximumReach = Math.max(96, 6 * rowHeight);
+  const maximumReach = MAX_CLIMB_REACH;
   const currentY = attachmentHandY(current);
   const currentMinimumX = minimumHandCenterX(current);
   const currentMaximumX = maximumHandCenterX(current);
@@ -102,7 +104,7 @@ function reachableSteps(
           : 0;
     if (
       verticalGap <= 0 ||
-      verticalGap > 4 * rowHeight ||
+      verticalGap > MAX_CLIMB_GAP_FACTOR * rowHeight ||
       reachGap > maximumReach
     ) {
       continue;
@@ -253,8 +255,12 @@ export function hasUsableHoldAbove(
   );
 }
 
-function climbMaximumReach(rowHeight: number): number {
-  return Math.max(96, 6 * rowHeight);
+function climbMaximumReach(): number {
+  return MAX_CLIMB_REACH;
+}
+
+function climbMaxGapForRowHeight(rowHeight: number): number {
+  return MAX_CLIMB_GAP_FACTOR * rowHeight;
 }
 
 /**
@@ -267,7 +273,8 @@ export function hasClimbingPathAnywhere(
   holds: readonly TerminalRow[],
   rowHeight: number,
 ): boolean {
-  const maximumReach = climbMaximumReach(rowHeight);
+  const maximumReach = climbMaximumReach();
+  const climbGap = climbMaxGapForRowHeight(rowHeight);
   for (const current of holds) {
     if (!isUsableHandHold(current)) continue;
     const currentY = attachmentHandY(current);
@@ -278,7 +285,7 @@ export function hasClimbingPathAnywhere(
         continue;
       }
       const verticalGap = currentY - attachmentHandY(candidate);
-      if (verticalGap <= 0 || verticalGap > 4 * rowHeight) continue;
+      if (verticalGap <= 0 || verticalGap > climbGap) continue;
       const candidateMin = minimumHandCenterX(candidate);
       const candidateMax = maximumHandCenterX(candidate);
       const reachGap =
@@ -305,7 +312,8 @@ export function findTraverseTarget(
   handCenterX: number,
   rowHeight: number,
 ): number | null {
-  const maximumReach = climbMaximumReach(rowHeight);
+  const maximumReach = climbMaximumReach();
+  const climbGap = climbMaxGapForRowHeight(rowHeight);
   const minX = minimumHandCenterX(current);
   const maxX = maximumHandCenterX(current);
   const currentY = attachmentHandY(current);
@@ -317,7 +325,7 @@ export function findTraverseTarget(
       continue;
     }
     const verticalGap = currentY - attachmentHandY(candidate);
-    if (verticalGap <= 0 || verticalGap > 4 * rowHeight) continue;
+    if (verticalGap <= 0 || verticalGap > climbGap) continue;
     const candidateMin = minimumHandCenterX(candidate);
     const candidateMax = maximumHandCenterX(candidate);
     const lo = Math.max(minX, candidateMin - maximumReach);
@@ -345,7 +353,7 @@ export function chooseGrappleTarget(
   handCenterX: number,
   rowHeight: number,
 ): TerminalRow | undefined {
-  const climbMaxGap = 4 * rowHeight;
+  const climbMaxGap = climbMaxGapForRowHeight(rowHeight);
   const grappleMaxGap = GRAPPLE_MAX_GAP_FACTOR * rowHeight;
   const currentY = attachmentHandY(current);
   let best: TerminalRow | undefined;

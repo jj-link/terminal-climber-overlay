@@ -131,6 +131,13 @@ export const SLIP_DURATION = 0.28;
 export const ROUTE_LOOKAHEAD_DEPTH = 3;
 export const CLIMB_DURATION = 0.42;
 export const LAUNCH_DURATION = 0.7;
+/**
+ * A single hand-to-hand climb step may rise at most about one row and reach a
+ * few px sideways. Anything larger is a gap that must be traversed or grappled
+ * — never leapt over.
+ */
+export const MAX_CLIMB_GAP_FACTOR = 1.3;
+export const MAX_CLIMB_REACH = 24;
 export const GRAPPLE_DURATION = 0.55;
 /** Max vertical gap (in row heights) a grapple will cross beyond climb reach. */
 export const GRAPPLE_MAX_GAP_FACTOR = 12;

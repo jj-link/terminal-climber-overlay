@@ -306,7 +306,7 @@ describe('ClimberSimulation attachment rules', () => {
     const candidate = rendererSnapshot(['NEW', 'A', 'B', 'C'], {
       sampledAt: 100,
     });
-    candidate.rows[0].rect = { x: 260, y: 180, width: 30, height: 16 };
+    candidate.rows[0].rect = { x: 260, y: 200, width: 30, height: 16 };
 
     simulation.setTerminalSnapshot(candidate);
     frames.advance(16);
@@ -326,14 +326,12 @@ describe('ClimberSimulation attachment rules', () => {
     simulation.destroy();
   });
 
-  it('skips a volatile nearest row and confirms a stable higher route', () => {
+  it('does not commit to a volatile nearest row when the route is unstable', () => {
     const { simulation, frames } = hangingSimulation();
-    const route = rendererSnapshot(
-      ['volatile-1', 'stable', 'A', 'B', 'C'],
-      { sampledAt: 100 },
-    );
-    route.rows[0].rect = { x: 0, y: 184, width: 300, height: 16 };
-    route.rows[1].rect = { x: 0, y: 152, width: 300, height: 16 };
+    const route = rendererSnapshot(['volatile-1', 'A', 'B', 'C'], {
+      sampledAt: 100,
+    });
+    route.rows[0].rect = { x: 0, y: 200, width: 300, height: 16 };
 
     simulation.setTerminalSnapshot(route);
     frames.advance(16);
@@ -347,8 +345,9 @@ describe('ClimberSimulation attachment rules', () => {
       simulation.setTerminalSnapshot(route);
       frames.advance(16);
     }
-
-    expect(simulation.state).toBe('climbing');
+    // Climb steps are ~1 row, so the only step up is through the volatile row.
+    // The climber must not commit to (nor plant on) unstable text.
+    expect(simulation.state).toBe('hanging');
     simulation.destroy();
   });
 
@@ -403,7 +402,7 @@ describe('ClimberSimulation attachment rules', () => {
     const extended = rendererSnapshot(['NEW', 'A', 'B', 'C'], {
       sampledAt: 100,
     });
-    extended.rows[0].rect = { x: 0, y: 180, width: 300, height: 16 };
+    extended.rows[0].rect = { x: 0, y: 200, width: 300, height: 16 };
 
     simulation.setTerminalSnapshot(extended);
     frames.advance(16);
@@ -532,9 +531,9 @@ describe('DOM-free climber motion reducer', () => {
       'branch-top',
     ]);
     snapshot.rows[0].rect = { x: 100, y: 216, width: 60, height: 16 };
-    snapshot.rows[1].rect = { x: 140, y: 184, width: 30, height: 16 };
-    snapshot.rows[2].rect = { x: 0, y: 184, width: 30, height: 16 };
-    snapshot.rows[3].rect = { x: 0, y: 152, width: 30, height: 16 };
+    snapshot.rows[1].rect = { x: 120, y: 202, width: 26, height: 16 };
+    snapshot.rows[2].rect = { x: 140, y: 202, width: 26, height: 16 };
+    snapshot.rows[3].rect = { x: 170, y: 186, width: 26, height: 16 };
     const holds = getAttachableRows(createTerminalSnapshot(snapshot));
     const model = fallingModel();
     model.state = 'hanging';
@@ -589,7 +588,7 @@ describe('DOM-free climber motion reducer', () => {
   it('moves laterally only as required to reach the target text span', () => {
     const snapshot = rendererSnapshot(['current', 'target']);
     snapshot.rows[0].rect = { x: 80, y: 216, width: 100, height: 16 };
-    snapshot.rows[1].rect = { x: 150, y: 184, width: 80, height: 16 };
+    snapshot.rows[1].rect = { x: 150, y: 200, width: 80, height: 16 };
     const terminal = createTerminalSnapshot(snapshot);
     const holds = getAttachableRows(terminal);
     const model = fallingModel();
@@ -654,7 +653,7 @@ describe('DOM-free climber motion reducer', () => {
   it('does not grapple when the next text hold is within hand-to-hand reach', () => {
     const snapshot = rendererSnapshot(['current', 'next']);
     snapshot.rows[0].rect = { x: 0, y: 216, width: 300, height: 16 };
-    snapshot.rows[1].rect = { x: 0, y: 184, width: 300, height: 16 };
+    snapshot.rows[1].rect = { x: 0, y: 200, width: 300, height: 16 };
     const holds = getAttachableRows(createTerminalSnapshot(snapshot));
     const model = fallingModel();
     model.state = 'hanging';
@@ -682,8 +681,8 @@ describe('DOM-free climber motion reducer', () => {
     const snapshot = rendererSnapshot(['low', 'far-above', 'path-low', 'path-high']);
     snapshot.rows[0].rect = { x: 0, y: 216, width: 60, height: 16 }; // climber here
     snapshot.rows[1].rect = { x: 0, y: 80, width: 300, height: 16 };  // big gap from low
-    snapshot.rows[2].rect = { x: 200, y: 184, width: 60, height: 16 }; // climbable path elsewhere
-    snapshot.rows[3].rect = { x: 200, y: 152, width: 60, height: 16 };
+    snapshot.rows[2].rect = { x: 200, y: 201, width: 60, height: 16 }; // climbable path elsewhere
+    snapshot.rows[3].rect = { x: 200, y: 185, width: 60, height: 16 };
     const holds = getAttachableRows(createTerminalSnapshot(snapshot));
     const model = fallingModel();
     model.state = 'hanging';
@@ -706,7 +705,7 @@ describe('DOM-free climber motion reducer', () => {
   it('shimmies laterally to use a climbing path instead of grapping', () => {
     const snapshot = rendererSnapshot(['current', 'upper']);
     snapshot.rows[0].rect = { x: 0, y: 216, width: 300, height: 16 };
-    snapshot.rows[1].rect = { x: 280, y: 184, width: 60, height: 16 };
+    snapshot.rows[1].rect = { x: 280, y: 201, width: 60, height: 16 };
     const holds = getAttachableRows(createTerminalSnapshot(snapshot));
     const model = fallingModel();
     model.state = 'hanging';
