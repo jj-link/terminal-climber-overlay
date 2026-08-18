@@ -9,6 +9,7 @@ export type {
   HandSide,
   HandAnchor,
   HandSlip,
+  Grapple,
   ClimberMotionModel,
   ClimberMotionEnvironment,
 } from './climber-model';
@@ -28,6 +29,8 @@ export {
   CLIMB_DURATION,
   LAUNCH_DURATION,
   LANDING_RECOVERY,
+  GRAPPLE_DURATION,
+  GRAPPLE_MAX_GAP_FACTOR,
   POINTER_BUMP_SPEED,
   BUMP_IMPULSE_FACTOR,
   MAX_BUMP_IMPULSE,

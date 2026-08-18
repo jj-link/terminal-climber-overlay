@@ -4,9 +4,11 @@ import {
   ROUTE_LOOKAHEAD_DEPTH,
   TARGET_CONFIRM_SNAPSHOTS,
   HAND_CENTER_OFFSET_X,
+  GRAPPLE_MAX_GAP_FACTOR,
 } from './climber-model';
 import {
   isUsableHandHold,
+  isUsableClimberHold,
   rowByKey,
   attachmentHandY,
   handAnchor,
@@ -249,6 +251,129 @@ export function hasUsableHoldAbove(
       isUsableHandHold(candidate) &&
       attachmentHandY(candidate) < currentY - 0.5,
   );
+}
+
+function climbMaximumReach(rowHeight: number): number {
+  return Math.max(96, 6 * rowHeight);
+}
+
+/**
+ * True when a normal hand-to-hand climb step exists between any two usable
+ * text holds anywhere on screen. The grapple is a last resort and must NOT
+ * fire while such a path is available — the climber is expected to maneuver
+ * over to it along the text instead of ignoring the layout.
+ */
+export function hasClimbingPathAnywhere(
+  holds: readonly TerminalRow[],
+  rowHeight: number,
+): boolean {
+  const maximumReach = climbMaximumReach(rowHeight);
+  for (const current of holds) {
+    if (!isUsableHandHold(current)) continue;
+    const currentY = attachmentHandY(current);
+    const currentMin = minimumHandCenterX(current);
+    const currentMax = maximumHandCenterX(current);
+    for (const candidate of holds) {
+      if (candidate.key === current.key || !isUsableHandHold(candidate)) {
+        continue;
+      }
+      const verticalGap = currentY - attachmentHandY(candidate);
+      if (verticalGap <= 0 || verticalGap > 4 * rowHeight) continue;
+      const candidateMin = minimumHandCenterX(candidate);
+      const candidateMax = maximumHandCenterX(candidate);
+      const reachGap =
+        candidateMin > currentMax
+          ? candidateMin - currentMax
+          : candidateMax < currentMin
+            ? currentMin - candidateMax
+            : 0;
+      if (reachGap <= maximumReach) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Returns the hand-center x along the current row the climber should shimmy to
+ * in order to bring an upper text hold into hand-to-hand reach — i.e. pays out
+ * a little lateral movement to reach a climbing path. Returns null when no such
+ * step can be reached from anywhere on the current row (a true dead-end).
+ */
+export function findTraverseTarget(
+  current: TerminalRow,
+  holds: readonly TerminalRow[],
+  handCenterX: number,
+  rowHeight: number,
+): number | null {
+  const maximumReach = climbMaximumReach(rowHeight);
+  const minX = minimumHandCenterX(current);
+  const maxX = maximumHandCenterX(current);
+  const currentY = attachmentHandY(current);
+  let bestX: number | null = null;
+  let bestGap = Number.POSITIVE_INFINITY;
+
+  for (const candidate of holds) {
+    if (candidate.key === current.key || !isUsableHandHold(candidate)) {
+      continue;
+    }
+    const verticalGap = currentY - attachmentHandY(candidate);
+    if (verticalGap <= 0 || verticalGap > 4 * rowHeight) continue;
+    const candidateMin = minimumHandCenterX(candidate);
+    const candidateMax = maximumHandCenterX(candidate);
+    const lo = Math.max(minX, candidateMin - maximumReach);
+    const hi = Math.min(maxX, candidateMax + maximumReach);
+    if (lo > hi) continue;
+    const targetX = clamp(handCenterX, lo, hi);
+    const gap = Math.abs(targetX - handCenterX);
+    if (gap < bestGap) {
+      bestGap = gap;
+      bestX = targetX;
+    }
+  }
+  return bestX;
+}
+
+/**
+ * Picks the hold a grapple reels the climber onto when the next usable text
+ * hold sits beyond hand-to-hand reach (a vertical gap). The rope latches only
+ * onto a climbable text hold; empty screen space is never grappled. Prefers the
+ * candidate above with the least lateral drift, then the smallest gap.
+ */
+export function chooseGrappleTarget(
+  current: TerminalRow,
+  holds: readonly TerminalRow[],
+  handCenterX: number,
+  rowHeight: number,
+): TerminalRow | undefined {
+  const climbMaxGap = 4 * rowHeight;
+  const grappleMaxGap = GRAPPLE_MAX_GAP_FACTOR * rowHeight;
+  const currentY = attachmentHandY(current);
+  let best: TerminalRow | undefined;
+  let bestWeight = Number.POSITIVE_INFINITY;
+
+  for (const candidate of holds) {
+    if (candidate.key === current.key || !isUsableClimberHold(candidate)) {
+      continue;
+    }
+    const candidateY = attachmentHandY(candidate);
+    const verticalGap = currentY - candidateY;
+    // Only cross a gap the hands cannot already reach.
+    if (verticalGap <= climbMaxGap || verticalGap > grappleMaxGap) {
+      continue;
+    }
+    const targetHandX = clamp(
+      handCenterX,
+      minimumHandCenterX(candidate),
+      maximumHandCenterX(candidate),
+    );
+    const horizontal = Math.abs(targetHandX - handCenterX);
+    const weight = horizontal * 1000 + verticalGap;
+    if (weight < bestWeight) {
+      best = candidate;
+      bestWeight = weight;
+    }
+  }
+  return best;
 }
 
 export function hasConfirmedNextHold(

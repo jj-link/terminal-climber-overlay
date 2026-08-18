@@ -14,10 +14,10 @@
   <desc id="atlas-description">Thirty-two 48 pixel frames for hanging, climbing, launching, falling, landing, walking, reacting to a bump, reaching a summit, planting a flag, camping, and packing.</desc>
   <style>
     .ink { fill: #101719; }
-    .charcoal { fill: #273236; }
-    .saffron { fill: #dfa62d; }
-    .pale { fill: #f0e6cb; }
-    .teal { fill: #16504d; }
+    .charcoal { fill: #2b3338; }
+    .saffron { fill: #e85a2c; }
+    .pale { fill: #f6ead2; }
+    .teal { fill: #0f6b63; }
   </style>
 
   <!-- Row 0: hanging, shimmy, and reach frames. -->

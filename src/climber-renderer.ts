@@ -64,10 +64,23 @@ export function selectClimberSpriteCell(
     case 'hanging':
     case 'shimmying':
       return frame % 8;
-    case 'climbing':
-      return 8 + (frame % 4);
+    case 'climbing': {
+      if (reducedMotion) return 8;
+      // 4-beat climb driven by travel progress (0..1): search, pull, drive,
+      // place. Synced to the body reach so limbs never swim out of phase.
+      const p = clamp(phaseElapsed, 0, 1);
+      if (p < 0.25) return 8;
+      if (p < 0.5) return 9;
+      if (p < 0.75) return 10;
+      return 11;
+    }
     case 'launching':
-      return 12 + (frame % 2);
+      if (reducedMotion) return 12;
+      return phaseElapsed < 0.5 ? 12 : 13;
+    case 'grappling':
+      // Throw then pull overhead. The rendered rope line carries the rest.
+      if (reducedMotion) return 24;
+      return phaseElapsed < 0.3 ? 4 : 24;
     case 'summiting':
       if (reducedMotion) return 24;
       return phaseElapsed < SUMMIT_MANTLE_DURATION * 0.58 ? 24 : 25;
@@ -173,6 +186,7 @@ export class ClimberRenderer {
       pausedAtSummit ? motion.resumeState : motion.state;
 
     this.#renderCampsite(context, frame, visualState);
+    this.#renderGrapple(context, motion, visualState);
 
     const cell = selectClimberSpriteCell(
       visualState,
@@ -200,21 +214,21 @@ export class ClimberRenderer {
     }
 
     // A quiet fallback while the atlas decodes; it is replaced, not animated.
-    context.fillStyle = '#e3a62f';
+    context.fillStyle = '#e85a2c';
     context.fillRect(
       Math.round(motion.x + 9),
       Math.round(motion.y + 13),
       22,
       25,
     );
-    context.fillStyle = '#e8dfc5';
+    context.fillStyle = '#f6ead2';
     context.fillRect(
       Math.round(motion.x + 11),
       Math.round(motion.y + 2),
       18,
       13,
     );
-    context.fillStyle = '#123c43';
+    context.fillStyle = '#0f6b63';
     context.fillRect(
       Math.round(motion.x + 10),
       Math.round(motion.y + 38),
@@ -249,6 +263,30 @@ export class ClimberRenderer {
     if (this.#canvas.width !== pixelWidth) this.#canvas.width = pixelWidth;
     if (this.#canvas.height !== pixelHeight) this.#canvas.height = pixelHeight;
     this.#context.imageSmoothingEnabled = false;
+  }
+
+  #renderGrapple(
+    context: CanvasRenderingContext2D,
+    motion: Readonly<ClimberMotionModel>,
+    visualState: ClimberState,
+  ): void {
+    if (visualState !== 'grappling' || !motion.grapple) return;
+    const grapple = motion.grapple;
+    const lead =
+      grapple.leadHand === 'left' ? motion.leftHand : motion.rightHand;
+    const ropeStartX = Math.round(lead.x);
+    const ropeStartY = Math.round(lead.y + 4);
+    const ropeEndX = Math.round(grapple.anchorX);
+    const ropeEndY = Math.round(grapple.anchorY);
+    context.strokeStyle = '#101719';
+    context.lineWidth = 2;
+    context.beginPath();
+    context.moveTo(ropeStartX, ropeStartY);
+    context.lineTo(ropeEndX, ropeEndY);
+    context.stroke();
+    // Grapple hook at the latch point on the text row.
+    context.fillStyle = '#f0e6cb';
+    context.fillRect(ropeEndX - 2, ropeEndY - 2, 4, 4);
   }
 
   #renderCampsite(
@@ -314,7 +352,7 @@ export class ClimberRenderer {
           context.lineTo(anchorX + 1 + flagWidth, poleTopY + 6 + flutter);
           context.lineTo(anchorX + 1, poleTopY + 12);
           context.closePath();
-          context.fillStyle = '#dfa62d';
+          context.fillStyle = '#e85a2c';
           context.fill();
           context.strokeStyle = '#101719';
           context.lineWidth = 2;
@@ -349,9 +387,9 @@ export class ClimberRenderer {
         const gearY = Math.round(row.rect.y - 7);
         context.fillStyle = '#101719';
         context.fillRect(gearX - 1, gearY - 1, 14, 7);
-        context.fillStyle = '#16504d';
+        context.fillStyle = '#0f6b63';
         context.fillRect(gearX, gearY, 12, 5);
-        context.fillStyle = '#d7c693';
+        context.fillStyle = '#f6ead2';
         context.fillRect(gearX + 5, gearY, 2, 5);
       }
     }

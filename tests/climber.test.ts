@@ -7,6 +7,7 @@ import {
   HAND_SPREAD,
   HOLD_INSET,
   LANDING_RECOVERY,
+  GRAPPLE_DURATION,
   MAX_BUMP_IMPULSE,
   SPRITE_HEIGHT,
   SPRITE_WIDTH,
@@ -351,7 +352,7 @@ describe('ClimberSimulation attachment rules', () => {
     simulation.destroy();
   });
 
-  it('never treats a lower route dead end as the terminal summit', () => {
+  it('grapples past a lower route dead end up to the real summit', () => {
     const frames = new FrameDriver();
     const simulation = new ClimberSimulation({
       canvas: null,
@@ -366,10 +367,21 @@ describe('ClimberSimulation attachment rules', () => {
     simulation.setTerminalSnapshot(splitRoute);
 
     advanceUntil(simulation, frames, 'hanging', 160);
-    for (let frame = 0; frame < 200; frame += 1) frames.advance(16);
-
+    // The lower hold is a dead end, NOT the summit: with no climbable path
+    // anywhere there is only one text hold left above, so the climber grapples
+    // across to reach the genuine summit instead of falsely planting here.
     expect(simulation.state).toBe('hanging');
     expect(simulation.hasFlag).toBe(false);
+
+    for (
+      let frame = 0;
+      frame < 500 && simulation.state !== 'camped';
+      frame += 1
+    ) {
+      frames.advance(16);
+    }
+    expect(simulation.state).toBe('camped');
+    expect(simulation.hasFlag).toBe(true);
     simulation.destroy();
   });
 
@@ -461,6 +473,7 @@ describe('DOM-free climber motion reducer', () => {
       phaseElapsed: 0,
       travel: null,
       holdFollow: null,
+      grapple: null,
       summitStableElapsed: 0,
       summitStartY: 0,
       targetSnapshotCount: 0,
@@ -610,6 +623,116 @@ describe('DOM-free climber motion reducer', () => {
         snapshot.rows[1].rect.width -
         HOLD_INSET,
     );
+  });
+
+  it('grapples across a vertical gap to the next text hold', () => {
+    const snapshot = rendererSnapshot(['current', 'far-above']);
+    snapshot.rows[0].rect = { x: 0, y: 216, width: 300, height: 16 };
+    snapshot.rows[1].rect = { x: 0, y: 100, width: 300, height: 16 };
+    const holds = getAttachableRows(createTerminalSnapshot(snapshot));
+    const model = fallingModel();
+    model.state = 'hanging';
+    model.resumeState = 'hanging';
+    model.x = 110;
+    model.y = 200;
+    model.attachedKey = holds[0].key;
+    model.leftHand = { key: holds[0].key, x: 121, y: 224 };
+    model.rightHand = { key: holds[0].key, x: 139, y: 224 };
+
+    reduceClimberMotion(model, { holds }, 0.016);
+    expect(model.state).toBe('grappling');
+    expect(model.grapple?.targetKey).toBe(holds[1].key);
+
+    const limit = Math.ceil(GRAPPLE_DURATION / 0.05) + 2;
+    for (let frame = 0; frame < limit; frame += 1) {
+      reduceClimberMotion(model, { holds }, 0.05);
+    }
+    expect(model.state).toBe('hanging');
+    expect(model.attachedKey).toBe(holds[1].key);
+  });
+
+  it('does not grapple when the next text hold is within hand-to-hand reach', () => {
+    const snapshot = rendererSnapshot(['current', 'next']);
+    snapshot.rows[0].rect = { x: 0, y: 216, width: 300, height: 16 };
+    snapshot.rows[1].rect = { x: 0, y: 184, width: 300, height: 16 };
+    const holds = getAttachableRows(createTerminalSnapshot(snapshot));
+    const model = fallingModel();
+    model.state = 'hanging';
+    model.resumeState = 'hanging';
+    model.x = 110;
+    model.y = 200;
+    model.attachedKey = holds[0].key;
+    model.leftHand = { key: holds[0].key, x: 121, y: 224 };
+    model.rightHand = { key: holds[0].key, x: 139, y: 224 };
+    model.targetKey = holds[1].key;
+    model.targetSnapshotCount = 3;
+
+    for (
+      let frame = 0;
+      frame < 20 && model.state === 'hanging';
+      frame += 1
+    ) {
+      reduceClimberMotion(model, { holds }, 0.016);
+    }
+    expect(model.state).toBe('climbing');
+    expect(model.grapple).toBeNull();
+  });
+
+  it('does not grapple when a climbing path exists elsewhere on screen', () => {
+    const snapshot = rendererSnapshot(['low', 'far-above', 'path-low', 'path-high']);
+    snapshot.rows[0].rect = { x: 0, y: 216, width: 60, height: 16 }; // climber here
+    snapshot.rows[1].rect = { x: 0, y: 80, width: 300, height: 16 };  // big gap from low
+    snapshot.rows[2].rect = { x: 200, y: 184, width: 60, height: 16 }; // climbable path elsewhere
+    snapshot.rows[3].rect = { x: 200, y: 152, width: 60, height: 16 };
+    const holds = getAttachableRows(createTerminalSnapshot(snapshot));
+    const model = fallingModel();
+    model.state = 'hanging';
+    model.resumeState = 'hanging';
+    model.x = 6;
+    model.y = 200;
+    model.attachedKey = holds[0].key;
+    model.leftHand = { key: holds[0].key, x: 21, y: 224 };
+    model.rightHand = { key: holds[0].key, x: 39, y: 224 };
+
+    for (let frame = 0; frame < 30; frame += 1) {
+      reduceClimberMotion(model, { holds }, 0.016);
+    }
+    // A climbable step exists (path-low -> path-high), so the grapple must not
+    // fire even though the current hold cannot reach anything above itself.
+    expect(model.state).not.toBe('grappling');
+    expect(model.grapple).toBeNull();
+  });
+
+  it('shimmies laterally to use a climbing path instead of grapping', () => {
+    const snapshot = rendererSnapshot(['current', 'upper']);
+    snapshot.rows[0].rect = { x: 0, y: 216, width: 300, height: 16 };
+    snapshot.rows[1].rect = { x: 280, y: 184, width: 60, height: 16 };
+    const holds = getAttachableRows(createTerminalSnapshot(snapshot));
+    const model = fallingModel();
+    model.state = 'hanging';
+    model.resumeState = 'hanging';
+    model.x = 6; // hand center around x=30, far from the upper hold
+    model.y = 208;
+    model.attachedKey = holds[0].key;
+    model.targetKey = holds[1].key;
+    model.targetSnapshotCount = 3;
+    model.leftHand = { key: holds[0].key, x: 21, y: 224 };
+    model.rightHand = { key: holds[0].key, x: 39, y: 224 };
+
+    let grappled = false;
+    for (
+      let frame = 0;
+      frame < 200 && (model.state as string) !== 'climbing';
+      frame += 1
+    ) {
+      reduceClimberMotion(model, { holds }, 0.016);
+      if ((model.state as string) === 'grappling') grappled = true;
+    }
+    // He should cross the row to the path and climb, never grapple.
+    expect(grappled).toBe(false);
+    expect(model.grapple).toBeNull();
+    expect(model.state).toBe('climbing');
+    expect(model.travel?.targetKey).toBe(holds[1].key);
   });
 
   it('uses deliberate summit cadence and freezes it for reduced motion', () => {

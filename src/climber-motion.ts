@@ -6,6 +6,7 @@ import type {
   HandSide,
   HandAnchor,
   Travel,
+  Grapple,
 } from './climber-model';
 import {
   HAND_CENTER_OFFSET_X,
@@ -26,6 +27,7 @@ import {
   CAMP_PACK_DURATION,
   SUMMIT_STABILITY_DURATION,
   ROUTE_RETRY_DURATION,
+  GRAPPLE_DURATION,
   MAX_FRAME_DELTA,
   PACE_SPEED,
 } from './climber-model';
@@ -50,8 +52,11 @@ import {
 import {
   chooseLowestHold,
   choosePlannedNextHold,
+  chooseGrappleTarget,
   hasConfirmedNextHold,
   hasUsableHoldAbove,
+  hasClimbingPathAnywhere,
+  findTraverseTarget,
 } from './climber-routing';
 
 function moveToward(value: number, target: number, distance: number): number {
@@ -92,6 +97,7 @@ export function beginFall(
   model.routePlanKeys.length = 0;
   model.travel = null;
   model.holdFollow = null;
+  model.grapple = null;
   model.summitStableElapsed = 0;
   model.targetSnapshotCount = 0;
   model.routeSearchAboveY = Number.POSITIVE_INFINITY;
@@ -126,6 +132,7 @@ export function beginOneHandSlip(
   model.attachedKey = supportingAnchor.key;
   model.travel = null;
   model.holdFollow = null;
+  model.grapple = null;
   clearRoutePlan(model);
   model.summitStableElapsed = 0;
   model.routeSearchAboveY = Number.POSITIVE_INFINITY;
@@ -188,6 +195,7 @@ function attachToRow(
   model.attachedKey = row.key;
   model.slip = null;
   model.travel = null;
+  model.grapple = null;
   clearRoutePlan(model);
   model.summitStableElapsed = 0;
   model.routeSearchAboveY = Number.POSITIVE_INFINITY;
@@ -319,6 +327,47 @@ function startTravel(
   setMotionState(model, kind === 'launch' ? 'launching' : 'climbing');
 }
 
+function startGrapple(
+  model: ClimberMotionModel,
+  target: TerminalRow,
+): void {
+  const leadHand = chooseLeadHand(model, target);
+  const lead = handAnchor(model, leadHand);
+  const startLeadX = Number.isFinite(lead.x) ? lead.x : model.x + HAND_CENTER_OFFSET_X + handOffsetX(leadHand);
+  const startLeadY = Number.isFinite(lead.y) ? lead.y : model.y + HAND_OFFSET_Y;
+  const anchorX = clamp(
+    startLeadX,
+    minimumHandCenterX(target),
+    maximumHandCenterX(target),
+  );
+  const anchorY = attachmentHandY(target);
+  const endX = anchorX - HAND_CENTER_OFFSET_X - handOffsetX(leadHand);
+  const endY = anchorY - HAND_OFFSET_Y;
+  model.grapple = {
+    targetKey: target.key,
+    leadHand,
+    startX: model.x,
+    startY: model.y,
+    endX,
+    endY,
+    handStart: { x: startLeadX, y: startLeadY },
+    handEnd: { x: anchorX, y: anchorY },
+    anchorX,
+    anchorY,
+    elapsed: 0,
+    duration: GRAPPLE_DURATION,
+  };
+  model.attachedKey = target.key;
+  model.travel = null;
+  model.holdFollow = null;
+  model.slip = null;
+  clearRoutePlan(model);
+  model.targetKey = target.key;
+  model.summitStableElapsed = 0;
+  model.targetSnapshotCount = 0;
+  setMotionState(model, 'grappling');
+}
+
 export function isAttachedState(state: ClimberState): boolean {
   return (
     state === 'launching' ||
@@ -326,6 +375,7 @@ export function isAttachedState(state: ClimberState): boolean {
     state === 'shimmying' ||
     state === 'climbing' ||
     state === 'slipping' ||
+    state === 'grappling' ||
     isSummitState(state)
   );
 }
@@ -413,6 +463,9 @@ export function reduceClimberMotion(
         HAND_CENTER_OFFSET_X -
         handOffsetX(travel.leadHand);
       const progress = smoothstep(travel.elapsed / travel.duration);
+      // Keep the sprite phase in lockstep with the body translation so the
+      // limb cycle never swims independently of the actual reach-and-pull.
+      model.phaseElapsed = progress;
       model.x =
         travel.startX + (travel.targetBodyX - travel.startX) * progress;
       model.y =
@@ -466,6 +519,49 @@ export function reduceClimberMotion(
         model.routeSearchAboveY,
       );
       if (!hasConfirmedNextHold(model, next)) {
+        // Prefer the text: shimmy laterally along the current row to bring an
+        // upper hold within reach, so the climber works the layout instead of
+        // ignoring it.
+        const traverseX = findTraverseTarget(
+          current,
+          holds,
+          handCenterX,
+          cachedMedianRowHeight,
+        );
+        if (traverseX !== null) {
+          model.summitStableElapsed = 0;
+          const nextCenter = moveToward(
+            handCenterX,
+            traverseX,
+            SHIMMY_SPEED * dt,
+          );
+          model.x = nextCenter - HAND_CENTER_OFFSET_X;
+          const handY = attachmentHandY(current);
+          for (const side of ['left', 'right'] as const) {
+            const anchor = handAnchor(model, side);
+            if (anchor.key === current.key) {
+              anchor.x = nextCenter + handOffsetX(side);
+              anchor.y = handY;
+            }
+          }
+          break;
+        }
+        // The grapple is a last resort: only when no normal climb step exists
+        // anywhere on screen can the rope cross a genuine gap.
+        const grappleTarget = chooseGrappleTarget(
+          current,
+          holds,
+          handCenterX,
+          cachedMedianRowHeight,
+        );
+        if (
+          grappleTarget &&
+          !hasClimbingPathAnywhere(holds, cachedMedianRowHeight)
+        ) {
+          model.summitStableElapsed = 0;
+          startGrapple(model, grappleTarget);
+          break;
+        }
         if (hasUsableHoldAbove(current, holds)) {
           model.summitStableElapsed = 0;
         } else {
@@ -540,6 +636,57 @@ export function reduceClimberMotion(
       }
       if (nextHandCenterX === shimmyHandCenterX) {
         startTravel(model, 'climb', target, CLIMB_DURATION);
+      }
+      break;
+    }
+
+    case 'grappling': {
+      const grap = model.grapple;
+      const target = rowByKey(holds, grap?.targetKey ?? null);
+      if (!grap || !target || !grap.leadHand) {
+        beginFall(model);
+        break;
+      }
+      // The hold may have shifted since launch; re-clamp the latch point so a
+      // moving text row never yanks the rope past its edge.
+      const targetHandX = clamp(
+        grap.anchorX,
+        minimumHandCenterX(target),
+        maximumHandCenterX(target),
+      );
+      grap.anchorX = targetHandX;
+      grap.handEnd.x = targetHandX;
+      grap.endX = targetHandX - HAND_CENTER_OFFSET_X - handOffsetX(grap.leadHand);
+      grap.handEnd.y = attachmentHandY(target);
+      grap.endY = attachmentHandY(target) - HAND_OFFSET_Y;
+
+      grap.elapsed = Math.min(grap.duration, grap.elapsed + dt);
+      const progress = smoothstep(grap.elapsed / grap.duration);
+      model.phaseElapsed = progress;
+      // The grapple respects the text layout: first travel sideways so the
+      // body is directly beneath the lowest point of the target row, then reel
+      // straight up. (No diagonal zip ignoring the layout.)
+      const lateralPhase = 0.5;
+      if (progress < lateralPhase) {
+        const lateral = smoothstep(progress / lateralPhase);
+        model.x = grap.startX + (grap.endX - grap.startX) * lateral;
+        model.y = grap.startY;
+      } else {
+        const vertical = smoothstep(
+          (progress - lateralPhase) / (1 - lateralPhase),
+        );
+        model.x = grap.endX;
+        model.y = grap.startY + (grap.endY - grap.startY) * vertical;
+      }
+      const lead = handAnchor(model, grap.leadHand);
+      lead.x = grap.handStart.x + (grap.handEnd.x - grap.handStart.x) * progress;
+      lead.y = grap.handStart.y + (grap.handEnd.y - grap.handStart.y) * progress;
+      const trailing = handAnchor(model, oppositeHand(grap.leadHand));
+      trailing.x = model.x + HAND_CENTER_OFFSET_X + handOffsetX(oppositeHand(grap.leadHand));
+      trailing.y = model.y + HAND_OFFSET_Y;
+
+      if (grap.elapsed >= grap.duration) {
+        attachToRow(model, target, grap.leadHand);
       }
       break;
     }

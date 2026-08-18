@@ -7,6 +7,7 @@ export type ClimberState =
   | 'shimmying'
   | 'climbing'
   | 'slipping'
+  | 'grappling'
   | 'summiting'
   | 'planting'
   | 'camped'
@@ -65,6 +66,26 @@ export interface HoldFollow {
   duration: number;
 }
 
+/**
+ * A one-shot grapple launched from a hang when the next usable text hold is
+ * beyond normal hand-to-hand reach (a vertical gap). The rope only ever
+ * latches onto a text hold — never empty space.
+ */
+export interface Grapple {
+  targetKey: string;
+  leadHand: HandSide;
+  startX: number;
+  startY: number;
+  endX: number;
+  endY: number;
+  handStart: Point;
+  handEnd: Point;
+  anchorX: number;
+  anchorY: number;
+  elapsed: number;
+  duration: number;
+}
+
 export interface ClimberMotionModel {
   state: ClimberState;
   resumeState: Exclude<ClimberState, 'paused'>;
@@ -84,6 +105,7 @@ export interface ClimberMotionModel {
   phaseElapsed: number;
   travel: Travel | null;
   holdFollow: HoldFollow | null;
+  grapple: Grapple | null;
   summitStableElapsed: number;
   targetSnapshotCount: number;
   routeSearchAboveY: number;
@@ -100,8 +122,8 @@ export interface ClimberMotionEnvironment {
   medianRowHeight?: number;
 }
 
-export const SPRITE_WIDTH = 40;
-export const SPRITE_HEIGHT = 52;
+export const SPRITE_WIDTH = 48;
+export const SPRITE_HEIGHT = 48;
 export const GRAVITY = 1900;
 export const MAX_FALL_SPEED = 1450;
 export const SHIMMY_SPEED = 92;
@@ -109,6 +131,9 @@ export const SLIP_DURATION = 0.28;
 export const ROUTE_LOOKAHEAD_DEPTH = 3;
 export const CLIMB_DURATION = 0.42;
 export const LAUNCH_DURATION = 0.7;
+export const GRAPPLE_DURATION = 0.55;
+/** Max vertical gap (in row heights) a grapple will cross beyond climb reach. */
+export const GRAPPLE_MAX_GAP_FACTOR = 12;
 export const LANDING_RECOVERY = 0.35;
 export const POINTER_BUMP_SPEED = 180;
 export const BUMP_IMPULSE_FACTOR = 0.35;
@@ -164,6 +189,7 @@ export function createClimberMotionModel(
     phaseElapsed: 0,
     travel: null,
     holdFollow: null,
+    grapple: null,
     summitStableElapsed: 0,
     targetSnapshotCount: 0,
     routeSearchAboveY: Number.POSITIVE_INFINITY,
@@ -198,6 +224,7 @@ export function resetClimberMotionModel(model: ClimberMotionModel): void {
   model.targetKey = null;
   model.travel = null;
   model.holdFollow = null;
+  model.grapple = null;
   model.phaseElapsed = 0;
   model.summitStableElapsed = 0;
   model.targetSnapshotCount = 0;

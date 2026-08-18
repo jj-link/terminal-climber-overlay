@@ -501,6 +501,9 @@ export class ClimberSimulation {
         if (this.#motion.travel) {
           this.#motion.travel.targetKey = mappedTarget;
         }
+        if (this.#motion.grapple) {
+          this.#motion.grapple.targetKey = mappedTarget;
+        }
         if (this.#motion.travel && previousTarget) {
           const travelTarget = rowByKey(
             this.#motionEnvironment.holds,

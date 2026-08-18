@@ -23,6 +23,7 @@ const climberLabels: Record<ClimberState, string> = {
   planting: 'Planting flag',
   camped: 'Camped',
   packing: 'Packing camp',
+  grappling: 'Grappling across a gap',
   falling: 'Falling',
   slipping: 'Slipping',
   landing: 'Landing',
