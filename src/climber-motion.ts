@@ -28,6 +28,7 @@ import {
   SUMMIT_STABILITY_DURATION,
   ROUTE_RETRY_DURATION,
   GRAPPLE_DURATION,
+  MAX_LAUNCH_GAP_FACTOR,
   MAX_FRAME_DELTA,
   PACE_SPEED,
 } from './climber-model';
@@ -435,9 +436,21 @@ export function reduceClimberMotion(
         maximumHandCenterX(lowest),
       );
       const launchX = launchHandX - HAND_CENTER_OFFSET_X;
+      // Shimmy along the floor to be directly under the lowest text first.
       model.x = moveToward(model.x, launchX, SHIMMY_SPEED * dt);
       if (model.x === launchX) {
-        startTravel(model, 'launch', lowest, LAUNCH_DURATION);
+        // Only a modest bottom gap is a launch; a large one is reelled with the
+        // rope so the climber never leaps from the floor up over empty space.
+        const reach =
+          model.y + HAND_OFFSET_Y - attachmentHandY(lowest);
+        if (
+          reach <=
+          MAX_LAUNCH_GAP_FACTOR * cachedMedianRowHeight
+        ) {
+          startTravel(model, 'launch', lowest, LAUNCH_DURATION);
+        } else {
+          startGrapple(model, lowest);
+        }
       }
       break;
     }

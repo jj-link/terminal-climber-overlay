@@ -138,6 +138,11 @@ export const LAUNCH_DURATION = 0.7;
  */
 export const MAX_CLIMB_GAP_FACTOR = 1.3;
 export const MAX_CLIMB_REACH = 24;
+/**
+ * Max vertical reach (in row heights) for the floor launch to the lowest text.
+ * A bigger bottom gap is reelled onto with the grapple instead of a big jump.
+ */
+export const MAX_LAUNCH_GAP_FACTOR = 3;
 export const GRAPPLE_DURATION = 0.55;
 /** Max vertical gap (in row heights) a grapple will cross beyond climb reach. */
 export const GRAPPLE_MAX_GAP_FACTOR = 12;

@@ -734,6 +734,29 @@ describe('DOM-free climber motion reducer', () => {
     expect(model.travel?.targetKey).toBe(holds[1].key);
   });
 
+  it('grapples up from the floor to a first text hold that is far above', () => {
+    const snapshot = rendererSnapshot(['high-text']);
+    snapshot.rows[0].rect = { x: 0, y: 120, width: 300, height: 16 };
+    const holds = getAttachableRows(createTerminalSnapshot(snapshot));
+    const model = fallingModel();
+    model.state = 'grounded';
+    model.resumeState = 'grounded';
+    model.y = 252; // floor
+    model.x = 100; // already aligned under the (wide) hold
+    model.leftHand = { key: null, x: 117, y: 259 };
+    model.rightHand = { key: null, x: 135, y: 259 };
+
+    let sawLaunch = false;
+    for (let frame = 0; frame < 30; frame += 1) {
+      reduceClimberMotion(model, { holds }, 0.016);
+      if ((model.state as string) === 'launching') sawLaunch = true;
+      if ((model.state as string) === 'grappling') break;
+    }
+    // A large bottom gap must be grappled, not leapt over.
+    expect(model.state).toBe('grappling');
+    expect(sawLaunch).toBe(false);
+  });
+
   it('uses deliberate summit cadence and freezes it for reduced motion', () => {
     expect(selectClimberSpriteCell('hanging', 0, false, false)).toBe(0);
     expect(selectClimberSpriteCell('hanging', 140, false, false)).toBe(1);
