@@ -7,6 +7,7 @@ import {
   GRAPPLE_MAX_GAP_FACTOR,
   MAX_CLIMB_GAP_FACTOR,
   MAX_CLIMB_REACH,
+  MIN_HOLD_WIDTH,
 } from './climber-model';
 import {
   isUsableHandHold,
@@ -18,6 +19,8 @@ import {
   handOffsetX,
   minimumHandCenterX,
   maximumHandCenterX,
+  minimumTwoHandCenterX,
+  maximumTwoHandCenterX,
   clamp,
 } from './climber-geometry';
 
@@ -302,9 +305,11 @@ export function hasClimbingPathAnywhere(
 
 /**
  * Returns the hand-center x along the current row the climber should shimmy to
- * in order to bring an upper text hold into hand-to-hand reach — i.e. pays out
- * a little lateral movement to reach a climbing path. Returns null when no such
- * step can be reached from anywhere on the current row (a true dead-end).
+ * work toward an upper text hold. A hold the hands can already grab after a
+ * short shimmy is preferred; if the nearest upper text is beyond hand-to-hand
+ * reach the climber still shimmies to the closest point on the row so he is
+ * never frozen in place. Returns null only when there is no upper text at all
+ * within a climbing row (a true dead-end).
  */
 export function findTraverseTarget(
   current: TerminalRow,
@@ -314,11 +319,18 @@ export function findTraverseTarget(
 ): number | null {
   const maximumReach = climbMaximumReach();
   const climbGap = climbMaxGapForRowHeight(rowHeight);
-  const minX = minimumHandCenterX(current);
-  const maxX = maximumHandCenterX(current);
+  const twoHand = current.rect.width >= MIN_HOLD_WIDTH;
+  const minX = twoHand
+    ? minimumTwoHandCenterX(current)
+    : minimumHandCenterX(current);
+  const maxX = twoHand
+    ? maximumTwoHandCenterX(current)
+    : maximumHandCenterX(current);
   const currentY = attachmentHandY(current);
-  let bestX: number | null = null;
-  let bestGap = Number.POSITIVE_INFINITY;
+  let reachableX: number | null = null;
+  let reachableGap = Number.POSITIVE_INFINITY;
+  let nearestX: number | null = null;
+  let nearestGap = Number.POSITIVE_INFINITY;
 
   for (const candidate of holds) {
     if (candidate.key === current.key || !isUsableHandHold(candidate)) {
@@ -328,17 +340,32 @@ export function findTraverseTarget(
     if (verticalGap <= 0 || verticalGap > climbGap) continue;
     const candidateMin = minimumHandCenterX(candidate);
     const candidateMax = maximumHandCenterX(candidate);
-    const lo = Math.max(minX, candidateMin - maximumReach);
-    const hi = Math.min(maxX, candidateMax + maximumReach);
-    if (lo > hi) continue;
-    const targetX = clamp(handCenterX, lo, hi);
-    const gap = Math.abs(targetX - handCenterX);
-    if (gap < bestGap) {
-      bestGap = gap;
-      bestX = targetX;
+    const withinReach =
+      Math.max(minX, candidateMin - maximumReach) <=
+      Math.min(maxX, candidateMax + maximumReach);
+    // Closest point on the current row to the candidate's hand span.
+    const alignX =
+      candidateMin > maxX
+        ? maxX
+        : candidateMax < minX
+          ? minX
+          : clamp(
+              handCenterX,
+              Math.max(minX, candidateMin),
+              Math.min(maxX, candidateMax),
+            );
+    const gap = Math.abs(alignX - handCenterX);
+    if (gap < nearestGap) {
+      nearestGap = gap;
+      nearestX = alignX;
+    }
+    if (withinReach && gap < reachableGap) {
+      reachableGap = gap;
+      reachableX = alignX;
     }
   }
-  return bestX;
+
+  return reachableX ?? nearestX;
 }
 
 /**
@@ -353,9 +380,12 @@ export function chooseGrappleTarget(
   handCenterX: number,
   rowHeight: number,
 ): TerminalRow | undefined {
+  const maximumReach = climbMaximumReach();
   const climbMaxGap = climbMaxGapForRowHeight(rowHeight);
   const grappleMaxGap = GRAPPLE_MAX_GAP_FACTOR * rowHeight;
   const currentY = attachmentHandY(current);
+  const currentMin = minimumHandCenterX(current);
+  const currentMax = maximumHandCenterX(current);
   let best: TerminalRow | undefined;
   let bestWeight = Number.POSITIVE_INFINITY;
 
@@ -365,14 +395,24 @@ export function chooseGrappleTarget(
     }
     const candidateY = attachmentHandY(candidate);
     const verticalGap = currentY - candidateY;
-    // Only cross a gap the hands cannot already reach.
-    if (verticalGap <= climbMaxGap || verticalGap > grappleMaxGap) {
+    if (verticalGap <= 0 || verticalGap > grappleMaxGap) {
+      continue;
+    }
+    const candidateMin = minimumHandCenterX(candidate);
+    const candidateMax = maximumHandCenterX(candidate);
+    const lateralReachable =
+      Math.max(currentMin, candidateMin - maximumReach) <=
+      Math.min(currentMax, candidateMax + maximumReach);
+    // A normal step grabs it only when the row gap and the sideways reach both
+    // line up; anything else is a genuine gap the rope must cross.
+    const handReachable = verticalGap <= climbMaxGap && lateralReachable;
+    if (handReachable) {
       continue;
     }
     const targetHandX = clamp(
       handCenterX,
-      minimumHandCenterX(candidate),
-      maximumHandCenterX(candidate),
+      candidateMin,
+      candidateMax,
     );
     const horizontal = Math.abs(targetHandX - handCenterX);
     const weight = horizontal * 1000 + verticalGap;

@@ -26,6 +26,7 @@ import {
   FLAG_PLANT_DURATION,
   CAMP_PACK_DURATION,
   SUMMIT_STABILITY_DURATION,
+  EDGE_DROP_DURATION,
   ROUTE_RETRY_DURATION,
   GRAPPLE_DURATION,
   MAX_LAUNCH_GAP_FACTOR,
@@ -436,8 +437,9 @@ export function reduceClimberMotion(
         maximumHandCenterX(lowest),
       );
       const launchX = launchHandX - HAND_CENTER_OFFSET_X;
-      // Shimmy along the floor to be directly under the lowest text first.
-      model.x = moveToward(model.x, launchX, SHIMMY_SPEED * dt);
+      // Walk along the floor to be under the lowest text first: a grounded
+      // re-stand reads as getting back on his feet, not a zip across.
+      model.x = moveToward(model.x, launchX, PACE_SPEED * dt);
       if (model.x === launchX) {
         // Only a modest bottom gap is a launch; a large one is reelled with the
         // rope so the climber never leaps from the floor up over empty space.
@@ -541,7 +543,12 @@ export function reduceClimberMotion(
           handCenterX,
           cachedMedianRowHeight,
         );
-        if (traverseX !== null) {
+        const hasTraverseProgress =
+          traverseX !== null && Math.abs(traverseX - handCenterX) > 1;
+        // Shimmy while distance remains; once aligned at the closest point on
+        // the row, fall through so the rope can cross a gap the hands cannot
+        // reach instead of hanging in place.
+        if (hasTraverseProgress) {
           model.summitStableElapsed = 0;
           const nextCenter = moveToward(
             handCenterX,
@@ -573,6 +580,26 @@ export function reduceClimberMotion(
         ) {
           model.summitStableElapsed = 0;
           startGrapple(model, grappleTarget);
+          break;
+        }
+        if (grappleTarget) {
+          // Aligned at the row edge but the grapple is vetoed by a path
+          // elsewhere: wait a beat, then drop and slide toward the offset so
+          // the ground routing can work over to that path instead of hanging
+          // in place.
+          model.summitStableElapsed += dt;
+          if (model.summitStableElapsed >= EDGE_DROP_DURATION) {
+            const targetCenter = clamp(
+              handCenterX,
+              minimumHandCenterX(grappleTarget),
+              maximumHandCenterX(grappleTarget),
+            );
+            beginFall(
+              model,
+              SHIMMY_SPEED * Math.sign(targetCenter - handCenterX),
+            );
+            break;
+          }
           break;
         }
         if (hasUsableHoldAbove(current, holds)) {

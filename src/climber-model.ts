@@ -154,6 +154,7 @@ export const STATUS_GRACE_MS = 500;
 export const TARGET_CONFIRM_SNAPSHOTS = 3;
 export const ROUTE_RETRY_DURATION = 1.5;
 export const SUMMIT_STABILITY_DURATION = 1.2;
+export const EDGE_DROP_DURATION = 0.8;
 export const SUMMIT_MANTLE_DURATION = 0.55;
 export const FLAG_PLANT_DURATION = 0.8;
 export const CAMP_PACK_DURATION = 0.45;

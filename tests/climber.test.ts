@@ -365,7 +365,7 @@ describe('ClimberSimulation attachment rules', () => {
     splitRoute.rows[1].rect = { x: 250, y: 80, width: 30, height: 16 };
     simulation.setTerminalSnapshot(splitRoute);
 
-    advanceUntil(simulation, frames, 'hanging', 160);
+    advanceUntil(simulation, frames, 'hanging', 300);
     // The lower hold is a dead end, NOT the summit: with no climbable path
     // anywhere there is only one text hold left above, so the climber grapples
     // across to reach the genuine summit instead of falsely planting here.
@@ -549,6 +549,50 @@ describe('DOM-free climber motion reducer', () => {
     expect(model.targetKey).toBe(holds[2].key);
   });
 
+  it('reaches indented text just past reach instead of hanging in place', () => {
+    const snapshot = rendererSnapshot(['base', 'indented']);
+    snapshot.rows[0].rect = { x: 0, y: 216, width: 150, height: 16 };
+    // 46px from the base right edge (x=150) to the indented block: past a 24px
+    // hand-to-hand reach, so he shimmies to the edge then grapples the gap.
+    snapshot.rows[1].rect = { x: 190, y: 200, width: 150, height: 16 };
+    const holds = getAttachableRows(createTerminalSnapshot(snapshot));
+    const model = fallingModel();
+    model.state = 'hanging';
+    model.resumeState = 'hanging';
+    model.x = 4;
+    model.y = 200;
+    model.attachedKey = holds[0].key;
+    model.leftHand = { key: holds[0].key, x: 15, y: 224 };
+    model.rightHand = { key: holds[0].key, x: 33, y: 224 };
+    for (let i = 0; i < 200; i += 1) {
+      reduceClimberMotion(model, { holds }, 1 / 60);
+    }
+    expect(model.attachedKey).toBe(holds[1].key);
+  });
+
+  it('shimmies toward offset text past reach instead of freezing', () => {
+    const snapshot = rendererSnapshot(['base', 'offset']);
+    snapshot.rows[0].rect = { x: 0, y: 216, width: 150, height: 16 };
+    // 96px offset: beyond a 24px hand-to-hand reach, so he shimmies to the
+    // edge then grapples — the old code left him hanging frozen here.
+    snapshot.rows[1].rect = { x: 240, y: 200, width: 150, height: 16 };
+    const holds = getAttachableRows(createTerminalSnapshot(snapshot));
+    const model = fallingModel();
+    model.state = 'hanging';
+    model.resumeState = 'hanging';
+    model.x = 4;
+    model.y = 200;
+    model.attachedKey = holds[0].key;
+    model.leftHand = { key: holds[0].key, x: 15, y: 224 };
+    model.rightHand = { key: holds[0].key, x: 33, y: 224 };
+    const start = model.x;
+    for (let i = 0; i < 200; i += 1) {
+      reduceClimberMotion(model, { holds }, 1 / 60);
+    }
+    expect(Math.abs(model.x - start)).toBeGreaterThan(0);
+    expect(model.attachedKey).toBe(holds[1].key);
+  });
+
   it('never catches an intermediate hold while falling', () => {
     const terminal = createTerminalSnapshot(rendererSnapshot(['A', 'B', 'C']));
     const model = fallingModel();
@@ -700,6 +744,40 @@ describe('DOM-free climber motion reducer', () => {
     // fire even though the current hold cannot reach anything above itself.
     expect(model.state).not.toBe('grappling');
     expect(model.grapple).toBeNull();
+  });
+
+  it('drops to re-route when the grapple is vetoed by an unreachable path elsewhere', () => {
+    const snapshot = rendererSnapshot([
+      'base',
+      'offset',
+      'path-low',
+      'path-high',
+    ]);
+    snapshot.rows[0].rect = { x: 0, y: 216, width: 150, height: 16 }; // dead-end row
+    snapshot.rows[1].rect = { x: 240, y: 200, width: 150, height: 16 }; // out-of-reach offset
+    snapshot.rows[2].rect = { x: 240, y: 232, width: 60, height: 16 }; // lower path
+    snapshot.rows[3].rect = { x: 240, y: 216, width: 60, height: 16 }; // above path-low
+    const holds = getAttachableRows(createTerminalSnapshot(snapshot));
+    const model = fallingModel();
+    model.state = 'hanging';
+    model.resumeState = 'hanging';
+    model.x = 4;
+    model.y = 200;
+    model.attachedKey = holds[0].key;
+    model.leftHand = { key: holds[0].key, x: 15, y: 224 };
+    model.rightHand = { key: holds[0].key, x: 33, y: 224 };
+    const reached = new Set<string>();
+    let grappled = false;
+    for (let i = 0; i < 600; i += 1) {
+      reduceClimberMotion(model, { holds }, 1 / 60);
+      if (model.attachedKey) reached.add(model.attachedKey);
+      if (model.grapple) grappled = true;
+    }
+    // A climbable step exists elsewhere, so the last-resort grapple stays
+    // vetoed — but he is not stuck: he shimmies to the edge, drops to the
+    // floor, and the ground routing works over to the lower path.
+    expect(grappled).toBe(false);
+    expect(reached.has(holds[2].key)).toBe(true);
   });
 
   it('shimmies laterally to use a climbing path instead of grapping', () => {
