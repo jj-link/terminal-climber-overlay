@@ -103,12 +103,6 @@ export interface ClimberMotionModel {
   slip: HandSlip | null;
   routePlanKeys: string[];
   phaseElapsed: number;
-  /**
-   * Direction the climber is actively shuffling sideways along a text row:
-   * -1 left, +1 right, 0 still. Drives the shimmy sprite cadence so the limbs
-   * never pose the opposite way to the actual lateral movement.
-   */
-  shimmyDirection: -1 | 0 | 1;
   travel: Travel | null;
   holdFollow: HoldFollow | null;
   grapple: Grapple | null;
@@ -205,7 +199,6 @@ export function createClimberMotionModel(
     routePlanKeys: [],
     targetKey: null,
     phaseElapsed: 0,
-    shimmyDirection: 0,
     travel: null,
     holdFollow: null,
     grapple: null,
@@ -245,7 +238,6 @@ export function resetClimberMotionModel(model: ClimberMotionModel): void {
   model.holdFollow = null;
   model.grapple = null;
   model.phaseElapsed = 0;
-  model.shimmyDirection = 0;
   model.summitStableElapsed = 0;
   model.targetSnapshotCount = 0;
   model.routeSearchAboveY = Number.POSITIVE_INFINITY;

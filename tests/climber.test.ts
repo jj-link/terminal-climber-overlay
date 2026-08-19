@@ -470,7 +470,6 @@ describe('DOM-free climber motion reducer', () => {
       slip: null,
       routePlanKeys: [],
       phaseElapsed: 0,
-      shimmyDirection: 0,
       travel: null,
       holdFollow: null,
       grapple: null,
@@ -777,54 +776,6 @@ describe('DOM-free climber motion reducer', () => {
     expect(selectClimberSpriteCell('camped', 0, false, false, 8.5)).toBe(30);
     expect(selectClimberSpriteCell('camped', 0, false, false, 12.1)).toBe(28);
     expect(selectClimberSpriteCell('packing', 1_400, false, true)).toBe(31);
-  });
-
-  it('shimmies the limbs the direction the body actually moves', () => {
-    // Moving right: wobble between the neutral and the shimmy-right pose.
-    expect(
-      selectClimberSpriteCell('shimmying', 0, false, false, 0, null, 1),
-    ).toBe(0);
-    expect(
-      selectClimberSpriteCell('shimmying', 140, false, false, 0, null, 1),
-    ).toBe(3);
-    expect(
-      selectClimberSpriteCell('shimmying', 280, false, false, 0, null, 1),
-    ).toBe(0);
-    // Moving left: wobble between the neutral and the shimmy-left pose.
-    expect(
-      selectClimberSpriteCell('shimmying', 140, false, false, 0, null, -1),
-    ).toBe(2);
-    expect(
-      selectClimberSpriteCell('shimmying', 280, false, false, 0, null, -1),
-    ).toBe(0);
-    // A settle frame (direction 0) never shows a directional pose.
-    expect(
-      selectClimberSpriteCell('shimmying', 140, false, false, 0, null, 0),
-    ).toBe(0);
-    // Reduced motion freezes on the directional pose.
-    expect(
-      selectClimberSpriteCell('shimmying', 0, false, true, 0, null, 1),
-    ).toBe(3);
-    expect(
-      selectClimberSpriteCell('shimmying', 0, false, true, 0, null, -1),
-    ).toBe(2);
-    expect(
-      selectClimberSpriteCell('shimmying', 0, false, true, 0, null, 0),
-    ).toBe(0);
-    // An idle hang (no direction) sways between the two hang poses only.
-    expect(
-      selectClimberSpriteCell('hanging', 0, false, false, 0, null, 0),
-    ).toBe(0);
-    expect(
-      selectClimberSpriteCell('hanging', 140, false, false, 0, null, 0),
-    ).toBe(1);
-    // A lateral traverse that stays in the hanging state shimmies the right way.
-    expect(
-      selectClimberSpriteCell('hanging', 140, false, false, 0, null, 1),
-    ).toBe(3);
-    expect(
-      selectClimberSpriteCell('hanging', 140, false, false, 0, null, -1),
-    ).toBe(2);
   });
 
   it('non-reduced falling cycles through cells 14-17 at 140 ms cadence', () => {

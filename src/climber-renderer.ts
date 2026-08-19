@@ -50,7 +50,6 @@ export function selectClimberSpriteCell(
   reducedMotion: boolean,
   phaseElapsed = 0,
   slippingHand?: HandSide | null,
-  shimmyDirection: -1 | 0 | 1 = 0,
 ): number {
   if (bumped) return 23;
   const frame = reducedMotion ? 0 : Math.floor(timestamp / 140);
@@ -62,24 +61,9 @@ export function selectClimberSpriteCell(
   }
 
   switch (state) {
-    case 'shimmying':
-      // Slide the limbs the way the body actually shuffles: a directional
-      // shimmy pose wobbled against a neutral, never the opposite or a reach.
-      if (reducedMotion) {
-        return shimmyDirection < 0 ? 2 : shimmyDirection > 0 ? 3 : 0;
-      }
-      return frame % 2 === 0
-        ? 0
-        : shimmyDirection < 0
-          ? 2
-          : shimmyDirection > 0
-            ? 3
-            : 0;
     case 'hanging':
-      if (reducedMotion) return 0;
-      if (shimmyDirection < 0) return frame % 2 === 0 ? 0 : 2;
-      if (shimmyDirection > 0) return frame % 2 === 0 ? 0 : 3;
-      return frame % 2;
+    case 'shimmying':
+      return frame % 8;
     case 'climbing': {
       if (reducedMotion) return 8;
       // 4-beat climb driven by travel progress (0..1): search, pull, drive,
@@ -211,7 +195,6 @@ export class ClimberRenderer {
       this.#reducedMotion,
       motion.phaseElapsed,
       motion.slip?.side ?? null,
-      motion.shimmyDirection,
     );
     const column = cell % 8;
     const row = Math.floor(cell / 8);

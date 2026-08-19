@@ -516,7 +516,6 @@ export function reduceClimberMotion(
         break;
       }
       const handCenterX = alignBodyToAttachedHands(model, current);
-      model.shimmyDirection = 0;
       if (Number.isFinite(model.routeSearchAboveY)) {
         model.routeRetryElapsed += dt;
         if (model.routeRetryElapsed >= ROUTE_RETRY_DURATION) {
@@ -549,9 +548,6 @@ export function reduceClimberMotion(
             traverseX,
             SHIMMY_SPEED * dt,
           );
-          const traverseDelta = traverseX - handCenterX;
-          model.shimmyDirection =
-            traverseDelta > 0 ? 1 : traverseDelta < 0 ? -1 : 0;
           model.x = nextCenter - HAND_CENTER_OFFSET_X;
           const handY = attachmentHandY(current);
           for (const side of ['left', 'right'] as const) {
@@ -637,9 +633,6 @@ export function reduceClimberMotion(
         minimumHandCenterX(current),
         maximumHandCenterX(current),
       );
-      const shimmyDelta = shimmyHandCenterX - handCenterX;
-      model.shimmyDirection =
-        shimmyDelta > 0 ? 1 : shimmyDelta < 0 ? -1 : 0;
       const nextHandCenterX = moveToward(
         handCenterX,
         shimmyHandCenterX,
